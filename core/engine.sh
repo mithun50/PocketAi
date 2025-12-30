@@ -344,29 +344,25 @@ infer() {
     local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
     local model_name=$(basename "$model_path" | tr '[:upper:]' '[:lower:]')
 
-    # Token limits - Qwen3 needs more for thinking mode
+    # Token limits - Qwen3 has no limit (uses stop sequences)
     local max_tokens=40
     if [[ "$model_name" == *"qwen3"* ]]; then
-        max_tokens=150  # Extra tokens for <think> block
-        if [[ "$prompt" =~ (code|program|write|implement|function|script|algorithm|create|explain|describe|what|how|why) ]]; then
-            max_tokens=300
-        fi
+        max_tokens=""  # No limit for Qwen3
     elif [[ "$prompt" =~ (code|program|write|implement|function|script|algorithm|create|explain|describe|what|how|why) ]]; then
         max_tokens=200
     fi
 
-    # Qwen3-specific parameters (no default system prompt, adjusted temp)
+    # Qwen3-specific parameters (no token limit, uses stop sequences)
     if [[ "$model_name" == *"qwen3"* ]]; then
         container_run "$container_model" \
             -t "$threads" \
             -c "$ctx_size" \
             -p "<|im_start|>system
-You are a helpful assistant. Answer briefly and directly.<|im_end|>
+You are a helpful assistant. Always respond in English only.<|im_end|>
 <|im_start|>user
 $prompt<|im_end|>
 <|im_start|>assistant
 " \
-            -n "$max_tokens" \
             --temp 0.7 \
             --top-k 20 \
             --top-p 0.8 \
@@ -375,7 +371,7 @@ $prompt<|im_end|>
             -r "User:" \
             -r "Human:" \
             --log-disable \
-            --no-display-prompt 2>/dev/null | awk 'BEGIN{RS="</think>"} NR==2{gsub(/^[[:space:]]+/,""); print}' | sed 's/<|im_end|>//g' | head -c 500
+            --no-display-prompt 2>/dev/null | awk 'BEGIN{RS="</think>"} NR==2{gsub(/^[[:space:]]+/,""); print}' | sed 's/<|im_end|>//g'
     else
         # Original parameters for other models (Qwen2, SmolLM, Llama, etc.)
         container_run "$container_model" \
@@ -491,13 +487,10 @@ chat_interactive() {
         # Detect model type
         local model_name=$(basename "$model_path" | tr '[:upper:]' '[:lower:]')
 
-        # Token limits - Qwen3 needs more for thinking mode
+        # Token limits - Qwen3 has no limit (uses stop sequences)
         local max_tokens=40
         if [[ "$model_name" == *"qwen3"* ]]; then
-            max_tokens=150
-            if [[ "$user_input" =~ (code|program|write|implement|function|script|algorithm|create|explain|describe|what|how|why) ]]; then
-                max_tokens=300
-            fi
+            max_tokens=""  # No limit for Qwen3
         elif [[ "$user_input" =~ (code|program|write|implement|function|script|algorithm|create|explain|describe|what|how|why) ]]; then
             max_tokens=200
         fi
@@ -507,10 +500,10 @@ chat_interactive() {
         # Stream response
         local response_file="$tmp_dir/response_$$"
 
-        # Qwen3-specific chat (adjusted parameters, simple system prompt)
+        # Qwen3-specific chat (no token limit, uses stop sequences)
         if [[ "$model_name" == *"qwen3"* ]]; then
             local context="<|im_start|>system
-You are a helpful assistant. Answer briefly and directly.<|im_end|>
+You are a helpful assistant.<|im_end|>
 ${history}<|im_start|>user
 $user_input<|im_end|>
 <|im_start|>assistant
@@ -519,7 +512,6 @@ $user_input<|im_end|>
                 -t "$threads" \
                 -c "$ctx_size" \
                 -p "$context" \
-                -n "$max_tokens" \
                 --temp 0.7 \
                 --top-k 20 \
                 --top-p 0.8 \
@@ -530,11 +522,10 @@ $user_input<|im_end|>
                 --log-disable \
                 --no-display-prompt 2>/dev/null > "$response_file"
             # Strip thinking block and display
-            sed -n '/<\/think>/,$ p' "$response_file" | sed '1d; s/<|im_end|>//g' | head -c 500
+            sed -n '/<\/think>/,$ p' "$response_file" | sed '1d; s/<|im_end|>//g'
             # Update response file with clean content
-            local clean_response=$(sed -n '/<\/think>/,$ p' "$response_file" | sed '1d; s/<|im_end|>//g' | head -c 500)
+            local clean_response=$(sed -n '/<\/think>/,$ p' "$response_file" | sed '1d; s/<|im_end|>//g')
             echo "$clean_response" > "$response_file"
-            # Fake tee output - already displayed above
         else
             # Original parameters for other models
             local context="<|im_start|>system
@@ -590,6 +581,358 @@ $response<|im_end|>
 }
 
 # =============================================================================
+# API Server Mode
+# =============================================================================
+
+SERVER_PID_FILE="$DATA_DIR/server.pid"
+SERVER_PORT="${SERVER_PORT:-8080}"
+API_PORT="${API_PORT:-8081}"
+
+# =============================================================================
+# PocketAI REST API (Full Control)
+# =============================================================================
+
+api_start() {
+    log_step "Starting PocketAI REST API"
+    log_info "Port: $API_PORT"
+
+    # Create Python API server
+    local api_script="$DATA_DIR/api_server.py"
+    cat > "$api_script" << PYEOF
+#!/usr/bin/env python3
+import http.server
+import socketserver
+import json
+import subprocess
+import os
+import re
+from urllib.parse import urlparse, parse_qs
+
+PORT = int(os.environ.get('API_PORT', $API_PORT))
+POCKETAI_ROOT = os.environ.get('POCKETAI_ROOT', '$POCKETAI_ROOT')
+
+def run_cmd(cmd):
+    """Run shell command and return output"""
+    try:
+        result = subprocess.run(
+            f'source {POCKETAI_ROOT}/core/engine.sh && {cmd}',
+            shell=True, capture_output=True, text=True,
+            executable='/data/data/com.termux/files/usr/bin/bash'
+        )
+        return result.stdout.strip(), result.returncode == 0
+    except Exception as e:
+        return str(e), False
+
+class APIHandler(http.server.BaseHTTPRequestHandler):
+    def send_json(self, data, status=200):
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
+    def do_OPTIONS(self):
+        self.send_json({})
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+
+        if path == '/api/health':
+            self.send_json({'healthy': True})
+
+        elif path == '/api/status':
+            model, _ = run_cmd('config_get active_model')
+            version, _ = run_cmd('echo \$VERSION')
+            model_name = os.path.basename(model) if model else ''
+            self.send_json({'status': 'ok', 'version': version, 'model': model_name})
+
+        elif path == '/api/models':
+            out, _ = run_cmd('for n in "\${!MODEL_CATALOG[@]}"; do echo "\$n|\${MODEL_CATALOG[\$n]}"; done')
+            models = []
+            for line in out.split('\n'):
+                if '|' in line:
+                    parts = line.split('|')
+                    name = parts[0]
+                    info = parts[1].split('|') if len(parts) > 1 else ['', '', '', '']
+                    models.append({
+                        'name': name,
+                        'description': info[0] if len(info) > 0 else '',
+                        'size': info[1] if len(info) > 1 else '',
+                        'ram': info[2] if len(info) > 2 else ''
+                    })
+            self.send_json({'models': models})
+
+        elif path == '/api/models/installed':
+            out, _ = run_cmd('for f in "\$MODELS_DIR"/*.gguf; do [ -f "\$f" ] && echo "\$f"; done')
+            active, _ = run_cmd('config_get active_model')
+            models = []
+            for f in out.split('\n'):
+                if f and f.endswith('.gguf'):
+                    size_out, _ = run_cmd(f'du -h "{f}" | cut -f1')
+                    models.append({
+                        'name': os.path.basename(f),
+                        'size': size_out,
+                        'active': f == active
+                    })
+            self.send_json({'models': models})
+
+        elif path == '/api/config':
+            out, _ = run_cmd('cat "\$CONFIG_FILE" 2>/dev/null || echo ""')
+            config = {}
+            for line in out.split('\n'):
+                if '=' in line and not line.startswith('#'):
+                    k, v = line.split('=', 1)
+                    config[k] = v
+            self.send_json(config)
+
+        else:
+            self.send_json({'error': 'Not found'}, 404)
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length).decode() if content_length > 0 else '{}'
+
+        try:
+            data = json.loads(body)
+        except:
+            data = {}
+
+        if path == '/api/models/install':
+            model = data.get('model', '')
+            out, ok = run_cmd(f'model_install "{model}"')
+            self.send_json({'success': ok, 'message': out or f'Model {model} installed'})
+
+        elif path == '/api/models/remove':
+            model = data.get('model', '')
+            out, ok = run_cmd(f'model_remove "{model}"')
+            self.send_json({'success': ok, 'message': out or f'Model {model} removed'})
+
+        elif path == '/api/models/use':
+            model = data.get('model', '')
+            out, ok = run_cmd(f'model_activate "{model}"')
+            self.send_json({'success': ok, 'message': out or f'Model {model} activated'})
+
+        elif path == '/api/chat':
+            message = data.get('message', '')
+            out, ok = run_cmd(f'infer "{message}"')
+            self.send_json({'response': out})
+
+        elif path == '/api/config':
+            key = data.get('key', '')
+            value = data.get('value', '')
+            run_cmd(f'config_set "{key}" "{value}"')
+            self.send_json({'success': True})
+
+        else:
+            self.send_json({'error': 'Not found'}, 404)
+
+    def log_message(self, format, *args):
+        pass  # Suppress logging
+
+class CombinedHandler(APIHandler):
+    """Serve both API and static web files"""
+    def do_GET(self):
+        path = urlparse(self.path).path
+
+        # API routes
+        if path.startswith('/api/'):
+            return super().do_GET()
+
+        # Static files
+        web_dir = os.path.join(POCKETAI_ROOT, 'web')
+        if path == '/' or path == '':
+            path = '/index.html'
+
+        file_path = os.path.join(web_dir, path.lstrip('/'))
+
+        if os.path.isfile(file_path):
+            self.send_response(200)
+            if file_path.endswith('.html'):
+                self.send_header('Content-Type', 'text/html')
+            elif file_path.endswith('.js'):
+                self.send_header('Content-Type', 'application/javascript')
+            elif file_path.endswith('.css'):
+                self.send_header('Content-Type', 'text/css')
+            self.end_headers()
+            with open(file_path, 'rb') as f:
+                self.wfile.write(f.read())
+        else:
+            self.send_json({'error': 'Not found'}, 404)
+
+if __name__ == '__main__':
+    Handler = CombinedHandler if os.environ.get('SERVE_WEB') else APIHandler
+    socketserver.TCPServer.allow_reuse_address = True
+    with socketserver.TCPServer(('', PORT), Handler) as httpd:
+        mode = 'API + Web' if os.environ.get('SERVE_WEB') else 'API only'
+        print(f'Server running on port {PORT} ({mode})')
+        httpd.serve_forever()
+PYEOF
+    chmod +x "$api_script"
+
+    # Start Python API server
+    log_info "Starting API server..."
+    python3 "$api_script" &
+    local py_pid=$!
+
+    sleep 1
+    if kill -0 $py_pid 2>/dev/null; then
+        echo "$py_pid" > "$DATA_DIR/api.pid"
+        log_success "API server started on port $API_PORT (PID: $py_pid)"
+        echo ""
+        log_info "Endpoints:"
+        echo "  GET  /api/status          - System status"
+        echo "  GET  /api/models          - List available models"
+        echo "  GET  /api/models/installed - List installed models"
+        echo "  POST /api/models/install  - Install model {\"model\":\"name\"}"
+        echo "  POST /api/models/remove   - Remove model {\"model\":\"name\"}"
+        echo "  POST /api/models/use      - Activate model {\"model\":\"name\"}"
+        echo "  POST /api/chat            - Send message {\"message\":\"text\"}"
+        echo "  GET  /api/config          - Get config"
+        echo "  POST /api/config          - Set config {\"key\":\"k\",\"value\":\"v\"}"
+        echo ""
+    else
+        log_error "Failed to start API server"
+        return 1
+    fi
+}
+
+api_stop() {
+    if [[ -f "$DATA_DIR/api.pid" ]]; then
+        kill $(cat "$DATA_DIR/api.pid") 2>/dev/null
+        rm -f "$DATA_DIR/api.pid"
+        log_success "API server stopped"
+    else
+        log_info "API server not running"
+    fi
+}
+
+server_start() {
+    local model_path
+    model_path=$(config_get active_model)
+
+    if [[ -z "$model_path" || ! -f "$model_path" ]]; then
+        log_error "No model active. Run: pai install qwen3"
+        return 1
+    fi
+
+    # Check if already running
+    if server_status >/dev/null 2>&1; then
+        log_warn "Server already running on port $SERVER_PORT"
+        return 0
+    fi
+
+    local threads=$(config_get threads 4)
+    local ctx_size=$(config_get ctx_size 2048)
+    local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
+
+    log_step "Starting PocketAI API Server"
+    log_info "Model: $(basename "$model_path")"
+    log_info "Port: $SERVER_PORT"
+    log_info "Endpoint: http://localhost:$SERVER_PORT/v1/chat/completions"
+
+    # Start server in background inside proot container
+    proot-distro login "$CONTAINER_NAME" \
+        --bind "$POCKETAI_ROOT/data:/opt/pocketai/data" \
+        --bind "$POCKETAI_ROOT/models:/opt/pocketai/models" \
+        -- "$CONTAINER_BIN" \
+        -m "$container_model" \
+        -t "$threads" \
+        -c "$ctx_size" \
+        --server \
+        --host 0.0.0.0 \
+        --port "$SERVER_PORT" \
+        2>/dev/null &
+
+    local pid=$!
+    echo "$pid" > "$SERVER_PID_FILE"
+
+    # Wait for server to start
+    sleep 2
+
+    if server_status >/dev/null 2>&1; then
+        log_success "Server started (PID: $pid)"
+        echo ""
+        log_info "API Usage:"
+        echo ""
+        echo "  curl http://localhost:$SERVER_PORT/v1/chat/completions \\"
+        echo "    -H 'Content-Type: application/json' \\"
+        echo "    -d '{\"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}]}'"
+        echo ""
+        log_info "Stop with: pai server stop"
+    else
+        log_error "Failed to start server"
+        rm -f "$SERVER_PID_FILE"
+        return 1
+    fi
+}
+
+server_stop() {
+    if [[ ! -f "$SERVER_PID_FILE" ]]; then
+        log_warn "Server not running"
+        return 0
+    fi
+
+    local pid=$(cat "$SERVER_PID_FILE")
+
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null
+        sleep 1
+        # Force kill if still running
+        kill -9 "$pid" 2>/dev/null
+        log_success "Server stopped"
+    else
+        log_info "Server was not running"
+    fi
+
+    rm -f "$SERVER_PID_FILE"
+}
+
+server_status() {
+    if [[ ! -f "$SERVER_PID_FILE" ]]; then
+        return 1
+    fi
+
+    local pid=$(cat "$SERVER_PID_FILE")
+
+    if kill -0 "$pid" 2>/dev/null; then
+        # Also check if port is listening
+        if command -v curl &>/dev/null; then
+            curl -s "http://localhost:$SERVER_PORT/health" >/dev/null 2>&1
+            return $?
+        fi
+        return 0
+    fi
+
+    return 1
+}
+
+server_info() {
+    log_step "API Server Status"
+    echo ""
+
+    if server_status; then
+        local pid=$(cat "$SERVER_PID_FILE")
+        echo -e "  Status: ${GREEN}Running${RESET}"
+        echo "  PID:    $pid"
+        echo "  Port:   $SERVER_PORT"
+        echo "  URL:    http://localhost:$SERVER_PORT"
+        echo ""
+        echo "  Endpoints:"
+        echo "    POST /v1/chat/completions  - Chat API (OpenAI compatible)"
+        echo "    POST /v1/completions       - Completion API"
+        echo "    GET  /health               - Health check"
+    else
+        echo -e "  Status: ${YELLOW}Stopped${RESET}"
+        echo ""
+        echo "  Start with: pai server start"
+    fi
+    echo ""
+}
+
+# =============================================================================
 # System Info
 # =============================================================================
 
@@ -625,4 +968,6 @@ export -f container_exists container_create container_exec container_run
 export -f engine_installed engine_install engine_version
 export -f model_list_available model_list_installed model_install model_activate model_remove
 export -f infer chat_interactive system_info
+export -f server_start server_stop server_status server_info
+export -f api_start api_stop
 export -f log_info log_success log_warn log_error log_step

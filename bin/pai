@@ -59,6 +59,17 @@ show_help() {
     echo "    ask \"<prompt>\"    One-shot question to AI"
     echo "    complete \"<text>\" Complete the given text"
     echo ""
+    echo -e "  ${CYAN}Server (OpenAI-compatible)${RESET}"
+    echo "    server start      Start llamafile server (OpenAI API)"
+    echo "    server stop       Stop the server"
+    echo "    server status     Show server status"
+    echo ""
+    echo -e "  ${CYAN}REST API (Management)${RESET}"
+    echo "    api start         Start REST API server"
+    echo "    api stop          Stop REST API"
+    echo "    api status        Show API endpoints"
+    echo "    api web           Launch web dashboard"
+    echo ""
     echo -e "  ${CYAN}Config${RESET}"
     echo "    config            Show current configuration"
     echo "    config set <k> <v>  Set a configuration value"
@@ -380,6 +391,105 @@ cmd_complete() {
         2>/dev/null
 }
 
+cmd_server() {
+    local subcmd="${1:-status}"
+    shift || true
+
+    if ! engine_installed; then
+        log_error "PocketAI not initialized. Run: pai init"
+        return 1
+    fi
+
+    case "$subcmd" in
+        start)
+            server_start
+            ;;
+        stop)
+            server_stop
+            ;;
+        status|info)
+            server_info
+            ;;
+        restart)
+            server_stop
+            sleep 1
+            server_start
+            ;;
+        *)
+            log_error "Unknown server command: $subcmd"
+            echo "Usage: pai server [start|stop|status|restart]"
+            ;;
+    esac
+}
+
+cmd_api() {
+    local subcmd="${1:-status}"
+    shift || true
+
+    if ! engine_installed; then
+        log_error "PocketAI not initialized. Run: pai init"
+        return 1
+    fi
+
+    case "$subcmd" in
+        start)
+            api_start
+            ;;
+        web)
+            # Ensure API script exists (generate if needed)
+            if [[ ! -f "$DATA_DIR/api_server.py" ]]; then
+                api_start >/dev/null 2>&1
+                api_stop >/dev/null 2>&1
+            else
+                api_stop 2>/dev/null
+            fi
+
+            log_step "Starting PocketAI Web Dashboard + API"
+            log_info "URL: http://localhost:$API_PORT"
+            log_info "Dashboard: http://localhost:$API_PORT/"
+            log_info "API: http://localhost:$API_PORT/api/"
+            log_info "Press Ctrl+C to stop"
+            echo ""
+
+            # Start combined server (API + static files)
+            SERVE_WEB=1 python3 "$DATA_DIR/api_server.py" || \
+            { log_error "Failed to start web server"; return 1; }
+            ;;
+        stop)
+            api_stop
+            ;;
+        status)
+            if [[ -f "$DATA_DIR/api.pid" ]] && kill -0 $(cat "$DATA_DIR/api.pid") 2>/dev/null; then
+                log_success "REST API running on port $API_PORT"
+                echo ""
+                echo "Endpoints:"
+                echo "  GET  http://localhost:$API_PORT/api/status"
+                echo "  GET  http://localhost:$API_PORT/api/models"
+                echo "  GET  http://localhost:$API_PORT/api/models/installed"
+                echo "  POST http://localhost:$API_PORT/api/models/install"
+                echo "  POST http://localhost:$API_PORT/api/models/remove"
+                echo "  POST http://localhost:$API_PORT/api/models/use"
+                echo "  POST http://localhost:$API_PORT/api/chat"
+                echo "  GET  http://localhost:$API_PORT/api/config"
+                echo "  POST http://localhost:$API_PORT/api/config"
+                echo "  GET  http://localhost:$API_PORT/api/health"
+            else
+                log_info "REST API not running"
+                echo "Start with: pai api start"
+            fi
+            ;;
+        restart)
+            api_stop
+            sleep 1
+            api_start
+            ;;
+        *)
+            log_error "Unknown api command: $subcmd"
+            echo "Usage: pai api [start|stop|status|restart]"
+            ;;
+    esac
+}
+
 # =============================================================================
 # Main Router
 # =============================================================================
@@ -404,6 +514,10 @@ main() {
         chat|talk)      cmd_chat ;;
         ask|query|q)    cmd_ask "$@" ;;
         complete)       cmd_complete "$@" ;;
+
+        # Server
+        server)         cmd_server "$@" ;;
+        api)            cmd_api "$@" ;;
 
         # Config
         config|cfg)     cmd_config "$@" ;;
