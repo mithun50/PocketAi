@@ -340,14 +340,16 @@ infer() {
     container_run "$container_model" \
         -t "$threads" \
         -c "$ctx_size" \
-        -p "<|system|>
-You are a helpful AI assistant. Give short, direct answers.</s>
-<|user|>
-$prompt</s>
-<|assistant|>" \
+        -p "<|im_start|>system
+You are a helpful AI assistant. Give short, direct answers.<|im_end|>
+<|im_start|>user
+$prompt<|im_end|>
+<|im_start|>assistant
+" \
         -n 256 \
+        --temp 0.7 \
         --no-display-prompt \
-        2>/dev/null
+        2>/dev/null | sed 's/<|im_end|>.*//g'
 }
 
 chat_interactive() {
@@ -380,14 +382,16 @@ chat_interactive() {
         container_run "$container_model" \
             -t "$threads" \
             -c "$ctx_size" \
-            -p "<|system|>
-You are a helpful AI assistant. Give short, direct answers.</s>
-<|user|>
-$user_input</s>
-<|assistant|>" \
+            -p "<|im_start|>system
+You are a helpful AI assistant. Give short, direct answers.<|im_end|>
+<|im_start|>user
+$user_input<|im_end|>
+<|im_start|>assistant
+" \
             -n 256 \
+            --temp 0.7 \
             --no-display-prompt \
-            2>/dev/null
+            2>/dev/null | sed 's/<|im_end|>.*//g'
 
         echo ""
     done
