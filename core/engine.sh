@@ -345,7 +345,7 @@ infer() {
 Assistant:" \
         -n 256 \
         --temp 0.7 \
-        --no-display-prompt 2>&1 | grep -v "^llama\|^warning\|^main:"
+        --no-display-prompt 2>/dev/null
 }
 
 chat_interactive() {
@@ -406,7 +406,7 @@ Assistant:"
             -p "$context" \
             -n 256 \
             --temp 0.7 \
-            --no-display-prompt 2>&1 | grep -v "^llama\|^warning\|^main:" | head -20)
+            --no-display-prompt 2>/dev/null)
 
         echo "$response"
         echo ""
