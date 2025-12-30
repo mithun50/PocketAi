@@ -343,9 +343,23 @@ infer() {
         -c "$ctx_size" \
         -p "User: $prompt
 Assistant:" \
-        -n 256 \
+        -n 150 \
         --temp 0.7 \
-        --no-display-prompt 2>/dev/null | sed '/^Human:/,$d' | sed '/^User:/,$d' | cleanup_latex
+        --no-display-prompt 2>/dev/null | cut_response | cleanup_latex
+}
+
+# Cut response at fake continuations
+cut_response() {
+    awk '
+    /^Human:/ { exit }
+    /^User:/ { exit }
+    /^Assistant:/ { exit }
+    /^What is the / && NR > 3 { exit }
+    /^How do / && NR > 3 { exit }
+    /^Can you / && NR > 3 { exit }
+    /^Why / && NR > 3 { exit }
+    { print }
+    '
 }
 
 # Convert LaTeX to readable Unicode
@@ -434,9 +448,9 @@ Assistant:"
             -t "$threads" \
             -c "$ctx_size" \
             -p "$context" \
-            -n 256 \
+            -n 150 \
             --temp 0.7 \
-            --no-display-prompt 2>/dev/null | sed '/^Human:/,$d' | sed '/^User:/,$d' | cleanup_latex)
+            --no-display-prompt 2>/dev/null | cut_response | cleanup_latex)
 
         echo "$response"
         echo ""
