@@ -13,7 +13,7 @@ set -euo pipefail
 # =============================================================================
 
 readonly VERSION="2.0.0"
-readonly LLAMAFILE_VERSION="0.8.13"
+readonly LLAMAFILE_VERSION="0.9.3"
 readonly LLAMAFILE_URL="https://github.com/Mozilla-Ocho/llamafile/releases/download/${LLAMAFILE_VERSION}/llamafile-${LLAMAFILE_VERSION}"
 
 # Paths (set by init or caller)
@@ -106,10 +106,13 @@ container_exec() {
 container_run() {
     local model_path="$1"
     shift
+    # Use stdbuf for unbuffered output if available
+    local unbuf=""
+    command -v stdbuf &>/dev/null && unbuf="stdbuf -o0"
     proot-distro login "$CONTAINER_NAME" \
         --bind "$POCKETAI_ROOT/data:/opt/pocketai/data" \
         --bind "$POCKETAI_ROOT/models:/opt/pocketai/models" \
-        -- "$CONTAINER_BIN" -m "$model_path" "$@"
+        -- $unbuf "$CONTAINER_BIN" -m "$model_path" "$@"
 }
 
 # =============================================================================
@@ -157,12 +160,15 @@ engine_version() {
 
 # Built-in model catalog: name=description|size|min_ram_mb|url
 declare -A MODEL_CATALOG=(
-    # Ultra-light (< 1GB RAM) - Best small models
+    # Ultra-light (< 1GB RAM) - Best small models 2025
+    ["qwen3"]="Qwen3 0.6B ⭐NEW 2025|400MB|512|https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf"
     ["smollm2"]="SmolLM2 360M (Best tiny)|270MB|400|https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q8_0.gguf"
     ["qwen2"]="Qwen2.5 0.5B (Smart)|400MB|512|https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
     ["qwen"]="Qwen 0.5B Chat|395MB|512|https://huggingface.co/Qwen/Qwen1.5-0.5B-Chat-GGUF/resolve/main/qwen1_5-0_5b-chat-q4_k_m.gguf"
 
-    # Light (1-2GB RAM)
+    # Light (1-2GB RAM) - Best quality/size 2025
+    ["llama3.2"]="Llama 3.2 1B ⭐NEW 2025|700MB|1024|https://huggingface.co/hugging-quants/Llama-3.2-1B-Instruct-Q4_K_M-GGUF/resolve/main/llama-3.2-1b-instruct-q4_k_m.gguf"
+    ["llama3.2-3b"]="Llama 3.2 3B ⭐NEW 2025|2.0GB|2048|https://huggingface.co/hugging-quants/Llama-3.2-3B-Instruct-Q4_K_M-GGUF/resolve/main/llama-3.2-3b-instruct-q4_k_m.gguf"
     ["smollm2-1b"]="SmolLM2 1.7B (Best light)|1.0GB|1024|https://huggingface.co/bartowski/SmolLM2-1.7B-Instruct-GGUF/resolve/main/SmolLM2-1.7B-Instruct-Q4_K_M.gguf"
     ["qwen2-1b"]="Qwen2.5 1.5B (Smartest small)|1.0GB|1200|https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
     ["tinyllama"]="TinyLlama 1.1B|669MB|1024|https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
@@ -183,8 +189,8 @@ model_list_available() {
     printf "  ${BOLD}%-12s %-22s %-8s %-8s${RESET}\n" "NAME" "DESCRIPTION" "SIZE" "RAM"
     echo "  ────────────────────────────────────────────────────────"
 
-    # Sort by RAM requirement (smallest first)
-    for name in smollm2 qwen2 qwen smollm2-1b qwen2-1b tinyllama gemma2b phi2 qwen2-3b stablelm; do
+    # Sort by RAM requirement (smallest first) - includes 2025 models
+    for name in smollm2 qwen3 qwen2 qwen llama3.2 smollm2-1b qwen2-1b tinyllama llama3.2-3b gemma2b phi2 qwen2-3b stablelm; do
         [[ -z "${MODEL_CATALOG[$name]:-}" ]] && continue
         IFS='|' read -r desc size min_ram url <<< "${MODEL_CATALOG[$name]}"
 
@@ -204,15 +210,15 @@ model_list_available() {
     echo -e "  ${DIM}Your RAM: ${ram_mb}MB${RESET}"
     echo ""
 
-    # Recommendation
+    # Recommendation - prefer 2025 models
     if [[ $ram_mb -lt 1024 ]]; then
-        log_info "Recommended: ${BOLD}qwen${RESET} (fits your RAM)"
+        log_info "Recommended: ${BOLD}qwen3${RESET} ⭐ (best tiny 2025)"
     elif [[ $ram_mb -lt 2048 ]]; then
-        log_info "Recommended: ${BOLD}tinyllama${RESET} (best for your device)"
+        log_info "Recommended: ${BOLD}llama3.2${RESET} ⭐ (best small 2025)"
     elif [[ $ram_mb -lt 4096 ]]; then
-        log_info "Recommended: ${BOLD}gemma2b${RESET} or ${BOLD}phi2${RESET}"
+        log_info "Recommended: ${BOLD}llama3.2-3b${RESET} ⭐ (best medium 2025)"
     else
-        log_info "Recommended: ${BOLD}stablelm${RESET} or any model"
+        log_info "Recommended: ${BOLD}llama3.2-3b${RESET} or ${BOLD}qwen2-3b${RESET}"
     fi
     echo ""
 }
@@ -336,30 +342,74 @@ infer() {
     local threads=$(config_get threads 4)
     local ctx_size=$(config_get ctx_size 2048)
     local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
+    local model_name=$(basename "$model_path" | tr '[:upper:]' '[:lower:]')
 
-    # Run inference with simple prompt, cut off at fake continuations
-    container_run "$container_model" \
-        -t "$threads" \
-        -c "$ctx_size" \
-        -p "User: $prompt
-Assistant:" \
-        -n 150 \
-        --temp 0.7 \
-        --no-display-prompt 2>/dev/null | cut_response | cleanup_latex
+    # Token limits - Qwen3 needs more for thinking mode
+    local max_tokens=40
+    if [[ "$model_name" == *"qwen3"* ]]; then
+        max_tokens=150  # Extra tokens for <think> block
+        if [[ "$prompt" =~ (code|program|write|implement|function|script|algorithm|create|explain|describe|what|how|why) ]]; then
+            max_tokens=300
+        fi
+    elif [[ "$prompt" =~ (code|program|write|implement|function|script|algorithm|create|explain|describe|what|how|why) ]]; then
+        max_tokens=200
+    fi
+
+    # Qwen3-specific parameters (no default system prompt, adjusted temp)
+    if [[ "$model_name" == *"qwen3"* ]]; then
+        container_run "$container_model" \
+            -t "$threads" \
+            -c "$ctx_size" \
+            -p "<|im_start|>system
+You are a helpful assistant. Answer briefly and directly.<|im_end|>
+<|im_start|>user
+$prompt<|im_end|>
+<|im_start|>assistant
+" \
+            -n "$max_tokens" \
+            --temp 0.7 \
+            --top-k 20 \
+            --top-p 0.8 \
+            -r "<|im_end|>" \
+            -r "<|im_start|>" \
+            -r "User:" \
+            -r "Human:" \
+            --log-disable \
+            --no-display-prompt 2>/dev/null | awk 'BEGIN{RS="</think>"} NR==2{gsub(/^[[:space:]]+/,""); print}' | sed 's/<|im_end|>//g' | head -c 500
+    else
+        # Original parameters for other models (Qwen2, SmolLM, Llama, etc.)
+        container_run "$container_model" \
+            -t "$threads" \
+            -c "$ctx_size" \
+            -p "<|im_start|>system
+RULES: Answer in 1-2 sentences MAX. No questions back. No offers to help more. Just answer directly.<|im_end|>
+<|im_start|>user
+$prompt<|im_end|>
+<|im_start|>assistant
+" \
+            -n "$max_tokens" \
+            --temp 0.1 \
+            --repeat-penalty 2.5 \
+            --top-k 10 \
+            --top-p 0.7 \
+            -r "<|im_end|>" \
+            -r "<|im_start|>" \
+            -r "?" \
+            -r "User:" \
+            -r "Human:" \
+            -r "Let me" \
+            -r "Please" \
+            -r "feel free" \
+            -r "Is there" \
+            -r "Is it" \
+            --log-disable \
+            --no-display-prompt 2>/dev/null | head -c 500 | sed 's/<|im_end|>//g'
+    fi
 }
 
-# Cut response at fake continuations
+# Minimal cleanup - just stop at turn markers
 cut_response() {
-    awk '
-    /^Human:/ { exit }
-    /^User:/ { exit }
-    /^Assistant:/ { exit }
-    /^What is the / && NR > 3 { exit }
-    /^How do / && NR > 3 { exit }
-    /^Can you / && NR > 3 { exit }
-    /^Why / && NR > 3 { exit }
-    { print }
-    '
+    sed -n '/^###/q; /^User:/q; /^Human:/q; /^<|/q; p'
 }
 
 # Convert LaTeX to readable Unicode
@@ -410,8 +460,10 @@ chat_interactive() {
     local ctx_size=$(config_get ctx_size 2048)
     local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
 
-    # Use temp file for history (works on all bash versions)
-    local history_file="/tmp/pocketai_history_$$"
+    # Use temp file for history (Termux-compatible path)
+    local tmp_dir="${TMPDIR:-$HOME/.cache/pocketai}"
+    mkdir -p "$tmp_dir"
+    local history_file="$tmp_dir/pocketai_history_$$"
     echo -n "" > "$history_file"
     trap "rm -f '$history_file'" EXIT
 
@@ -431,33 +483,98 @@ chat_interactive() {
         fi
 
         # Read history and build context
-        local context=""
+        local history=""
         if [[ -s "$history_file" ]]; then
-            context=$(cat "$history_file")
+            history=$(cat "$history_file")
         fi
 
-        # Add current user message
-        context="${context}User: $user_input
-Assistant:"
+        # Detect model type
+        local model_name=$(basename "$model_path" | tr '[:upper:]' '[:lower:]')
+
+        # Token limits - Qwen3 needs more for thinking mode
+        local max_tokens=40
+        if [[ "$model_name" == *"qwen3"* ]]; then
+            max_tokens=150
+            if [[ "$user_input" =~ (code|program|write|implement|function|script|algorithm|create|explain|describe|what|how|why) ]]; then
+                max_tokens=300
+            fi
+        elif [[ "$user_input" =~ (code|program|write|implement|function|script|algorithm|create|explain|describe|what|how|why) ]]; then
+            max_tokens=200
+        fi
 
         echo -ne "${GREEN}AI>${RESET} "
 
-        # Get response and capture it
-        local response
-        response=$(container_run "$container_model" \
-            -t "$threads" \
-            -c "$ctx_size" \
-            -p "$context" \
-            -n 150 \
-            --temp 0.7 \
-            --no-display-prompt 2>/dev/null | cut_response | cleanup_latex)
+        # Stream response
+        local response_file="$tmp_dir/response_$$"
 
-        echo "$response"
+        # Qwen3-specific chat (adjusted parameters, simple system prompt)
+        if [[ "$model_name" == *"qwen3"* ]]; then
+            local context="<|im_start|>system
+You are a helpful assistant. Answer briefly and directly.<|im_end|>
+${history}<|im_start|>user
+$user_input<|im_end|>
+<|im_start|>assistant
+"
+            container_run "$container_model" \
+                -t "$threads" \
+                -c "$ctx_size" \
+                -p "$context" \
+                -n "$max_tokens" \
+                --temp 0.7 \
+                --top-k 20 \
+                --top-p 0.8 \
+                -r "<|im_end|>" \
+                -r "<|im_start|>" \
+                -r "User:" \
+                -r "Human:" \
+                --log-disable \
+                --no-display-prompt 2>/dev/null > "$response_file"
+            # Strip thinking block and display
+            sed -n '/<\/think>/,$ p' "$response_file" | sed '1d; s/<|im_end|>//g' | head -c 500
+            # Update response file with clean content
+            local clean_response=$(sed -n '/<\/think>/,$ p' "$response_file" | sed '1d; s/<|im_end|>//g' | head -c 500)
+            echo "$clean_response" > "$response_file"
+            # Fake tee output - already displayed above
+        else
+            # Original parameters for other models
+            local context="<|im_start|>system
+RULES: Answer in 1-2 sentences MAX. No questions back. No offers to help more. Just answer directly.<|im_end|>
+${history}<|im_start|>user
+$user_input<|im_end|>
+<|im_start|>assistant
+"
+            container_run "$container_model" \
+                -t "$threads" \
+                -c "$ctx_size" \
+                -p "$context" \
+                -n "$max_tokens" \
+                --temp 0.1 \
+                --repeat-penalty 2.5 \
+                --top-k 10 \
+                --top-p 0.7 \
+                -r "<|im_end|>" \
+                -r "<|im_start|>" \
+                -r "?" \
+                -r "User:" \
+                -r "Human:" \
+                -r "Let me" \
+                -r "Please" \
+                -r "feel free" \
+                -r "Is there" \
+                -r "Is it" \
+                --log-disable \
+                --no-display-prompt 2>/dev/null | head -c 500 | sed 's/<|im_end|>//g' | tee "$response_file"
+        fi
+
+        local response=$(cat "$response_file")
+        rm -f "$response_file"
         echo ""
 
-        # Append to history file
-        echo "User: $user_input
-Assistant: $response
+        # Append to history file (ChatML format)
+        echo "<|im_start|>user
+$user_input<|im_end|>
+<|im_start|>assistant
+$response<|im_end|>
 " >> "$history_file"
 
         # Trim history to last 4 exchanges (keep file under ~2000 bytes)
