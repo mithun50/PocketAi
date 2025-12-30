@@ -345,7 +345,37 @@ infer() {
 Assistant:" \
         -n 256 \
         --temp 0.7 \
-        --no-display-prompt 2>/dev/null | sed '/^Human:/,$d' | sed '/^User:/,$d'
+        --no-display-prompt 2>/dev/null | sed '/^Human:/,$d' | sed '/^User:/,$d' | cleanup_latex
+}
+
+# Convert LaTeX to readable Unicode
+cleanup_latex() {
+    sed -e 's/\\times/×/g' \
+        -e 's/\\div/÷/g' \
+        -e 's/\\pm/±/g' \
+        -e 's/\\leq/≤/g' \
+        -e 's/\\geq/≥/g' \
+        -e 's/\\neq/≠/g' \
+        -e 's/\\approx/≈/g' \
+        -e 's/\\infty/∞/g' \
+        -e 's/\\sqrt/√/g' \
+        -e 's/\\alpha/α/g' \
+        -e 's/\\beta/β/g' \
+        -e 's/\\gamma/γ/g' \
+        -e 's/\\delta/δ/g' \
+        -e 's/\\pi/π/g' \
+        -e 's/\\theta/θ/g' \
+        -e 's/\\lambda/λ/g' \
+        -e 's/\\mu/μ/g' \
+        -e 's/\\sigma/σ/g' \
+        -e 's/\\omega/ω/g' \
+        -e 's/\\frac{\([^}]*\)}{\([^}]*\)}/\1\/\2/g' \
+        -e 's/\\text{\([^}]*\)}/\1/g' \
+        -e 's/\\\[ *//g' \
+        -e 's/ *\\\]//g' \
+        -e 's/\\( *//g' \
+        -e 's/ *\\)//g' \
+        -e 's/\\cdot/·/g'
 }
 
 chat_interactive() {
@@ -406,7 +436,7 @@ Assistant:"
             -p "$context" \
             -n 256 \
             --temp 0.7 \
-            --no-display-prompt 2>/dev/null | sed '/^Human:/,$d' | sed '/^User:/,$d')
+            --no-display-prompt 2>/dev/null | sed '/^Human:/,$d' | sed '/^User:/,$d' | cleanup_latex)
 
         echo "$response"
         echo ""
