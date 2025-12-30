@@ -1,4 +1,4 @@
-# 🤖 PocketAI
+# PocketAI
 
 <div align="center">
 
@@ -8,41 +8,32 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-Android%20(Termux)-green.svg)](https://termux.dev/)
-[![Engine](https://img.shields.io/badge/Engine-llamafile-blue.svg)](https://github.com/Mozilla-Ocho/llamafile)
+[![Engine](https://img.shields.io/badge/Engine-llamafile%200.9.3-blue.svg)](https://github.com/Mozilla-Ocho/llamafile)
+[![Version](https://img.shields.io/badge/Version-2.0.0-purple.svg)](https://github.com/mithun50/PocketAi/releases)
 
 </div>
 
 ---
 
-## ✨ Features
+## Features
 
-- **🔒 100% Offline** - Works without internet after initial setup
-- **🆓 Free Forever** - No subscriptions, no API keys, no hidden costs
-- **⚡ No Compilation** - Powered by Mozilla llamafile (just download and run)
-- **🛡️ Private & Secure** - Your data never leaves your device
-- **📱 Android Native** - Optimized for mobile with proot isolation
-- **🎯 Multiple Models** - Choose from tiny (270MB) to powerful (2GB+)
+- **100% Offline** - Works without internet after initial setup
+- **Free Forever** - No subscriptions, no API keys, no hidden costs
+- **No Compilation** - Powered by Mozilla llamafile (just download and run)
+- **Private & Secure** - Your data never leaves your device
+- **Android Native** - Optimized for mobile with proot isolation
+- **Multiple Models** - Choose from tiny (270MB) to powerful (2GB+)
+- **Web Dashboard** - Browser-based UI for easy management
+- **REST API** - Full control via HTTP endpoints
+- **OpenAI Compatible** - Drop-in replacement for OpenAI API
 
-## 🚀 Quick Start
+## Quick Start
 
 ### One-Command Install
 
 ```bash
-# Clone the repository
 git clone https://github.com/mithun50/PocketAi.git
 cd PocketAi
-
-# Run setup
-./setup.sh
-```
-
-### Manual Install
-
-```bash
-# Install in Termux
-pkg install git
-git clone https://github.com/mithun50/PocketAi.git ~/pocketai
-cd ~/pocketai
 ./setup.sh
 ```
 
@@ -52,33 +43,42 @@ cd ~/pocketai
 # Activate environment (or restart terminal)
 source ~/.pocketai_env
 
-# Install a model
-pai install qwen2-1b
+# Install a model (Qwen3 recommended for 2025)
+pai install qwen3
 
 # Start chatting!
 pai chat
 ```
 
-## 📦 Available Models
+## Available Models
+
+### 2025 Models (Recommended)
 
 | Model | Size | RAM | Quality | Best For |
 |-------|------|-----|---------|----------|
-| `smollm2` | 270MB | 400MB | ⭐⭐ | Ultra-low RAM devices |
-| `qwen2` | 400MB | 512MB | ⭐⭐⭐ | Low RAM, good quality |
-| `qwen2-1b` | 1.0GB | 1.2GB | ⭐⭐⭐⭐ | **Best balance** ✨ |
-| `smollm2-1b` | 1.0GB | 1GB | ⭐⭐⭐ | Fast responses |
+| `qwen3` | 400MB | 512MB | ⭐⭐⭐ | **Best for low RAM** |
+| `llama3.2` | 700MB | 1GB | ⭐⭐⭐⭐ | **Best balance** |
+| `llama3.2-3b` | 2.0GB | 2GB | ⭐⭐⭐⭐⭐ | Best quality |
+
+### Classic Models
+
+| Model | Size | RAM | Quality | Best For |
+|-------|------|-----|---------|----------|
+| `smollm2` | 270MB | 400MB | ⭐⭐ | Ultra-low RAM |
+| `qwen2` | 400MB | 512MB | ⭐⭐⭐ | Low RAM |
+| `qwen2-1b` | 1.0GB | 1.2GB | ⭐⭐⭐⭐ | Daily use |
 | `gemma2b` | 1.4GB | 2GB | ⭐⭐⭐⭐ | Google quality |
 | `qwen2-3b` | 2.0GB | 3GB | ⭐⭐⭐⭐⭐ | Best quality |
 | `phi2` | 1.6GB | 3GB | ⭐⭐⭐⭐ | Coding tasks |
 
-## 🎮 Commands
+## Commands
 
-### Basic Usage
+### Chat & Inference
 
 ```bash
-pai help                 # Show all commands
 pai chat                 # Interactive chat
 pai ask "What is AI?"    # Quick question
+pai complete "Once..."   # Text completion
 ```
 
 ### Model Management
@@ -91,59 +91,131 @@ pai use <model>          # Switch active model
 pai remove <model>       # Delete a model
 ```
 
-### System
+### OpenAI-Compatible Server
 
 ```bash
-pai status               # System information
-pai doctor               # Diagnose issues
-pai config               # View configuration
+pai server start         # Start API server (port 8080)
+pai server stop          # Stop the server
+pai server status        # Show server info
+```
+
+Use with any OpenAI-compatible client:
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+### REST API & Web Dashboard
+
+```bash
+pai api start            # Start REST API (port 8081)
+pai api web              # Start API + Web Dashboard
+pai api stop             # Stop API server
+pai api status           # Show API endpoints
+```
+
+Open http://localhost:8081/ in your browser for the web dashboard.
+
+**API Endpoints:**
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Health check |
+| GET | `/api/status` | System status |
+| GET | `/api/models` | Available models |
+| GET | `/api/models/installed` | Installed models |
+| POST | `/api/models/install` | Install model |
+| POST | `/api/models/use` | Switch model |
+| POST | `/api/chat` | Send message |
+| GET | `/api/config` | Get config |
+| POST | `/api/config` | Set config |
+
+### Configuration
+
+```bash
+pai config               # Show current config
 pai config set key val   # Change settings
+pai config reset         # Reset to defaults
 ```
-
-## 📁 Project Structure
-
-```
-pocketai/
-├── bin/
-│   └── pai              # CLI tool
-├── core/
-│   └── engine.sh        # Core engine
-├── data/
-│   ├── config           # Configuration
-│   └── llamafile        # Runtime engine
-├── models/              # Downloaded models
-├── docs/                # Documentation
-│   ├── COMMANDS.md      # Command reference
-│   ├── MODELS.md        # Model guide
-│   └── TROUBLESHOOTING.md
-├── setup.sh             # Installer
-└── README.md
-```
-
-## ⚙️ Configuration
-
-Configuration file: `~/ALLM/pocketai/data/config`
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `threads` | 4 | CPU threads to use |
 | `ctx_size` | 2048 | Context window size |
-| `active_model` | - | Currently active model |
+
+### System
 
 ```bash
-# Change settings
-pai config set threads 2      # Use 2 threads
-pai config set ctx_size 1024  # Smaller context
+pai status               # System information
+pai doctor               # Diagnose issues
+pai help                 # Show all commands
+pai version              # Version info
 ```
 
-## 🔧 Requirements
+## Project Structure
+
+```
+pocketai/
+├── bin/
+│   └── pai                  # CLI entry point
+├── core/
+│   └── engine.sh            # Core engine (inference, models, API)
+├── data/
+│   ├── config               # User configuration
+│   ├── llamafile            # LLM runtime engine
+│   └── api_server.py        # REST API server
+├── models/                  # Downloaded GGUF models
+├── web/
+│   └── index.html           # Web dashboard
+├── docs/
+│   ├── COMMANDS.md          # Command reference
+│   ├── MODELS.md            # Model guide
+│   └── TROUBLESHOOTING.md   # Problem solving
+├── setup.sh                 # Installer
+└── README.md
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        PocketAI                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   ┌─────────┐    ┌──────────┐    ┌─────────────────────┐    │
+│   │   CLI   │───►│  Engine  │───►│  proot container    │    │
+│   │  (pai)  │    │          │    │  (Alpine Linux)     │    │
+│   └─────────┘    └──────────┘    └──────────┬──────────┘    │
+│                                              │               │
+│   ┌─────────┐    ┌──────────┐               ▼               │
+│   │   Web   │───►│ REST API │         ┌──────────┐          │
+│   │Dashboard│    │ (Python) │         │llamafile │          │
+│   └─────────┘    └──────────┘         └────┬─────┘          │
+│                                             │                │
+│   ┌─────────┐                              ▼                │
+│   │ OpenAI  │◄────────────────────  GGUF Model             │
+│   │ Clients │                                               │
+│   └─────────┘                                               │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Components:**
+1. **pai CLI** - User-friendly bash interface
+2. **engine.sh** - Core logic (model management, inference, API)
+3. **api_server.py** - REST API + Web dashboard server
+4. **llamafile** - Mozilla's portable LLM runtime
+5. **proot** - Lightweight Linux container for isolation
+6. **GGUF models** - Quantized models optimized for mobile
+
+## Requirements
 
 - **Device**: Android phone/tablet
 - **App**: [Termux](https://termux.dev/) from F-Droid
 - **Storage**: 1GB+ free (varies by model)
 - **RAM**: 512MB+ (more = better models)
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Quick Fix
 ```bash
@@ -155,39 +227,14 @@ pai doctor    # Diagnose all issues
 | Issue | Solution |
 |-------|----------|
 | `pai: command not found` | Run `source ~/.pocketai_env` |
-| `No model active` | Run `pai install qwen2` |
+| `No model active` | Run `pai install qwen3` |
 | Slow responses | Use smaller model: `pai use smollm2` |
 | Out of memory | Close apps, use smaller model |
+| API offline | Run `pai api web` not `pai api start` |
 
 See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for more.
 
-## 🏗️ How It Works
-
-```
-┌─────────────────────────────────────────────────────┐
-│                    PocketAI                         │
-├─────────────────────────────────────────────────────┤
-│  User ──► pai CLI ──► engine.sh ──► llamafile      │
-│                           │                         │
-│                           ▼                         │
-│                    proot container                  │
-│                    (Alpine Linux)                   │
-│                           │                         │
-│                           ▼                         │
-│                    GGUF Model File                  │
-│                           │                         │
-│                           ▼                         │
-│                    AI Response                      │
-└─────────────────────────────────────────────────────┘
-```
-
-1. **pai CLI** - User-friendly command interface
-2. **engine.sh** - Core logic for model management
-3. **llamafile** - Mozilla's portable LLM runtime
-4. **proot** - Lightweight Linux container for isolation
-5. **GGUF models** - Quantized models optimized for mobile
-
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
@@ -197,18 +244,18 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 4. Push to the branch (`git push origin feature/amazing`)
 5. Open a Pull Request
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [Mozilla llamafile](https://github.com/Mozilla-Ocho/llamafile) - Portable LLM runtime
 - [Termux](https://termux.dev/) - Android terminal emulator
 - [proot-distro](https://github.com/termux/proot-distro) - Linux containers for Termux
-- Model providers: Qwen, HuggingFace, Google, Microsoft
+- Model providers: Qwen, Meta (Llama), HuggingFace, Google, Microsoft
 
-## 📬 Contact
+## Contact
 
 - **Author**: Mithun
 - **GitHub**: [@mithun50](https://github.com/mithun50)
@@ -218,8 +265,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**⭐ Star this repo if you find it useful!**
+**Star this repo if you find it useful!**
 
-Made with ❤️ for the Android AI community
+Made with love for the Android AI community
 
 </div>

@@ -1,4 +1,4 @@
-# 🧠 PocketAI Models Guide
+# PocketAI Models Guide
 
 Complete guide to choosing and using AI models.
 
@@ -7,16 +7,58 @@ Complete guide to choosing and using AI models.
 | Your RAM | Best Model | Install Command |
 |----------|------------|-----------------|
 | < 512MB | smollm2 | `pai install smollm2` |
-| 512MB-1GB | qwen2 | `pai install qwen2` |
-| 1-2GB | qwen2-1b | `pai install qwen2-1b` |
-| 2-3GB | gemma2b | `pai install gemma2b` |
+| 512MB-1GB | qwen3 | `pai install qwen3` |
+| 1-2GB | llama3.2 | `pai install llama3.2` |
+| 2-3GB | llama3.2-3b | `pai install llama3.2-3b` |
 | 3GB+ | qwen2-3b | `pai install qwen2-3b` |
+
+---
+
+## 2025 Models (Recommended)
+
+These are the newest and best-performing models for their size.
+
+### Qwen3 0.6B (Best for Low RAM)
+```bash
+pai install qwen3
+```
+- **Size**: 400MB
+- **RAM**: 512MB minimum
+- **Speed**: Fast
+- **Quality**: ⭐⭐⭐
+- **Best for**: Low RAM devices, quick responses
+- **Provider**: Alibaba (2025)
+- **Features**: Thinking mode, multilingual
+
+### Llama 3.2 1B (Best Balance)
+```bash
+pai install llama3.2
+```
+- **Size**: 700MB
+- **RAM**: 1GB minimum
+- **Speed**: Fast
+- **Quality**: ⭐⭐⭐⭐
+- **Best for**: Daily use, best quality-to-size ratio
+- **Provider**: Meta (2025)
+- **Features**: Instruction following, reasoning
+
+### Llama 3.2 3B (Best Quality 2025)
+```bash
+pai install llama3.2-3b
+```
+- **Size**: 2.0GB
+- **RAM**: 2GB minimum
+- **Speed**: Medium
+- **Quality**: ⭐⭐⭐⭐⭐
+- **Best for**: Best overall quality in 2025 lineup
+- **Provider**: Meta (2025)
+- **Features**: Advanced reasoning, coding
 
 ---
 
 ## All Available Models
 
-### 🪶 Ultra-Light (Under 1GB RAM)
+### Ultra-Light (Under 1GB RAM)
 
 #### SmolLM2 360M
 ```bash
@@ -24,10 +66,21 @@ pai install smollm2
 ```
 - **Size**: 270MB
 - **RAM**: 400MB minimum
-- **Speed**: ⚡⚡⚡⚡⚡ Fastest
+- **Speed**: Fastest
 - **Quality**: ⭐⭐
 - **Best for**: Ultra-low RAM, quick responses
 - **Provider**: HuggingFace
+
+#### Qwen3 0.6B
+```bash
+pai install qwen3
+```
+- **Size**: 400MB
+- **RAM**: 512MB minimum
+- **Speed**: Fast
+- **Quality**: ⭐⭐⭐
+- **Best for**: Low RAM, good quality (2025)
+- **Provider**: Alibaba
 
 #### Qwen2.5 0.5B
 ```bash
@@ -35,24 +88,46 @@ pai install qwen2
 ```
 - **Size**: 400MB
 - **RAM**: 512MB minimum
-- **Speed**: ⚡⚡⚡⚡
+- **Speed**: Fast
 - **Quality**: ⭐⭐⭐
 - **Best for**: Low RAM, decent quality
 - **Provider**: Alibaba
 
+#### Qwen 0.5B (Legacy)
+```bash
+pai install qwen
+```
+- **Size**: 395MB
+- **RAM**: 512MB minimum
+- **Speed**: Fast
+- **Quality**: ⭐⭐
+- **Best for**: Legacy support
+- **Provider**: Alibaba
+
 ---
 
-### 🎯 Light (1-2GB RAM) - Recommended
+### Light (1-2GB RAM) - Recommended
 
-#### Qwen2.5 1.5B ✨ Best Balance
+#### Llama 3.2 1B
+```bash
+pai install llama3.2
+```
+- **Size**: 700MB
+- **RAM**: 1GB minimum
+- **Speed**: Fast
+- **Quality**: ⭐⭐⭐⭐
+- **Best for**: Daily use, best quality-to-size ratio (2025)
+- **Provider**: Meta
+
+#### Qwen2.5 1.5B
 ```bash
 pai install qwen2-1b
 ```
 - **Size**: 1.0GB
 - **RAM**: 1.2GB minimum
-- **Speed**: ⚡⚡⚡
+- **Speed**: Medium
 - **Quality**: ⭐⭐⭐⭐
-- **Best for**: Daily use, best quality-to-size ratio
+- **Best for**: Daily use, smartest small model
 - **Provider**: Alibaba
 
 #### SmolLM2 1.7B
@@ -61,7 +136,7 @@ pai install smollm2-1b
 ```
 - **Size**: 1.0GB
 - **RAM**: 1GB minimum
-- **Speed**: ⚡⚡⚡⚡
+- **Speed**: Fast
 - **Quality**: ⭐⭐⭐
 - **Best for**: Fast responses, good quality
 - **Provider**: HuggingFace
@@ -72,14 +147,25 @@ pai install tinyllama
 ```
 - **Size**: 669MB
 - **RAM**: 1GB minimum
-- **Speed**: ⚡⚡⚡⚡
+- **Speed**: Fast
 - **Quality**: ⭐⭐
 - **Best for**: Legacy support
 - **Provider**: TinyLlama Project
 
 ---
 
-### 🚀 Medium (2-4GB RAM)
+### Medium (2-4GB RAM)
+
+#### Llama 3.2 3B
+```bash
+pai install llama3.2-3b
+```
+- **Size**: 2.0GB
+- **RAM**: 2GB minimum
+- **Speed**: Medium
+- **Quality**: ⭐⭐⭐⭐⭐
+- **Best for**: Best 2025 quality, general tasks
+- **Provider**: Meta
 
 #### Gemma 2 2B
 ```bash
@@ -87,7 +173,7 @@ pai install gemma2b
 ```
 - **Size**: 1.4GB
 - **RAM**: 2GB minimum
-- **Speed**: ⚡⚡⚡
+- **Speed**: Medium
 - **Quality**: ⭐⭐⭐⭐
 - **Best for**: Google quality, general tasks
 - **Provider**: Google
@@ -98,18 +184,18 @@ pai install phi2
 ```
 - **Size**: 1.6GB
 - **RAM**: 3GB minimum
-- **Speed**: ⚡⚡
+- **Speed**: Slow
 - **Quality**: ⭐⭐⭐⭐
 - **Best for**: Coding, reasoning
 - **Provider**: Microsoft
 
-#### Qwen2.5 3B ⭐ Best Quality
+#### Qwen2.5 3B (Best Classic Quality)
 ```bash
 pai install qwen2-3b
 ```
 - **Size**: 2.0GB
 - **RAM**: 3GB minimum
-- **Speed**: ⚡⚡
+- **Speed**: Slow
 - **Quality**: ⭐⭐⭐⭐⭐
 - **Best for**: Best overall quality
 - **Provider**: Alibaba
@@ -120,7 +206,7 @@ pai install stablelm
 ```
 - **Size**: 2.0GB
 - **RAM**: 4GB minimum
-- **Speed**: ⚡⚡
+- **Speed**: Slow
 - **Quality**: ⭐⭐⭐⭐
 - **Best for**: Creative writing
 - **Provider**: Stability AI
@@ -129,22 +215,22 @@ pai install stablelm
 
 ## Model Comparison
 
-### By Quality
+### By Quality (2025 Rankings)
 ```
-Best ─────────────────────────────────► Basic
-qwen2-3b > gemma2b > qwen2-1b > phi2 > smollm2-1b > qwen2 > smollm2
+Best ──────────────────────────────────────────────► Basic
+llama3.2-3b > qwen2-3b > llama3.2 > qwen2-1b > qwen3 > smollm2
 ```
 
 ### By Speed
 ```
-Fastest ──────────────────────────────► Slowest
-smollm2 > qwen2 > smollm2-1b > qwen2-1b > gemma2b > phi2 > qwen2-3b
+Fastest ───────────────────────────────────────────► Slowest
+smollm2 > qwen3 > llama3.2 > qwen2-1b > gemma2b > llama3.2-3b > qwen2-3b
 ```
 
 ### By Size
 ```
-Smallest ─────────────────────────────► Largest
-smollm2 (270MB) < qwen2 (400MB) < tinyllama (669MB) < qwen2-1b (1GB) < gemma2b (1.4GB) < phi2 (1.6GB) < qwen2-3b (2GB)
+Smallest ──────────────────────────────────────────► Largest
+smollm2 (270MB) < qwen3 (400MB) < llama3.2 (700MB) < qwen2-1b (1GB) < gemma2b (1.4GB) < llama3.2-3b (2GB)
 ```
 
 ---
@@ -152,21 +238,21 @@ smollm2 (270MB) < qwen2 (400MB) < tinyllama (669MB) < qwen2-1b (1GB) < gemma2b (
 ## Use Cases
 
 ### General Chat
-**Recommended**: `qwen2-1b` or `qwen2-3b`
+**Recommended**: `llama3.2` or `llama3.2-3b`
 ```bash
-pai install qwen2-1b
+pai install llama3.2
 pai chat
 ```
 
 ### Quick Answers
-**Recommended**: `smollm2` or `qwen2`
+**Recommended**: `qwen3` or `smollm2`
 ```bash
-pai install smollm2
+pai install qwen3
 pai ask "What time is it in Tokyo?"
 ```
 
 ### Coding Help
-**Recommended**: `phi2` or `qwen2-3b`
+**Recommended**: `phi2` or `llama3.2-3b`
 ```bash
 pai install phi2
 pai ask "Write a Python function to sort a list"
@@ -194,15 +280,15 @@ pai config set ctx_size 512
 ### Install Multiple Models
 ```bash
 pai install smollm2
-pai install qwen2-1b
-pai install qwen2-3b
+pai install qwen3
+pai install llama3.2
 ```
 
 ### Switch Between Models
 ```bash
 pai use smollm2      # Quick answers
-pai use qwen2-1b     # Better quality
-pai use qwen2-3b     # Best quality
+pai use qwen3        # Better quality
+pai use llama3.2     # Best quality
 ```
 
 ### Check Installed Models
@@ -263,7 +349,7 @@ pai config set ctx_size 1024
 ### For Better Quality
 ```bash
 # Use larger model
-pai use qwen2-3b
+pai use llama3.2-3b
 
 # Increase context
 pai config set ctx_size 4096
@@ -290,9 +376,23 @@ All models are downloaded from trusted sources:
 
 | Model | Source |
 |-------|--------|
+| Qwen3 | [HuggingFace/unsloth](https://huggingface.co/unsloth) |
+| Llama 3.2 | [HuggingFace/hugging-quants](https://huggingface.co/hugging-quants) |
 | SmolLM2 | [HuggingFace/bartowski](https://huggingface.co/bartowski) |
 | Qwen2.5 | [HuggingFace/Qwen](https://huggingface.co/Qwen) |
 | TinyLlama | [HuggingFace/TheBloke](https://huggingface.co/TheBloke) |
 | Gemma | [HuggingFace/bartowski](https://huggingface.co/bartowski) |
 | Phi-2 | [HuggingFace/TheBloke](https://huggingface.co/TheBloke) |
 | StableLM | [HuggingFace/TheBloke](https://huggingface.co/TheBloke) |
+
+---
+
+## Model Changelog
+
+### 2025 Additions
+- **Qwen3 0.6B** - New thinking mode, better multilingual
+- **Llama 3.2 1B** - Meta's latest small model
+- **Llama 3.2 3B** - Best quality in 2025 lineup
+
+### Legacy Models
+- Qwen 0.5B, TinyLlama - Still available for compatibility
