@@ -337,7 +337,7 @@ infer() {
     local ctx_size=$(config_get ctx_size 2048)
     local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
 
-    # Run inference with simple prompt
+    # Run inference with simple prompt, cut off at fake continuations
     container_run "$container_model" \
         -t "$threads" \
         -c "$ctx_size" \
@@ -345,7 +345,7 @@ infer() {
 Assistant:" \
         -n 256 \
         --temp 0.7 \
-        --no-display-prompt 2>/dev/null
+        --no-display-prompt 2>/dev/null | sed '/^Human:/,$d' | sed '/^User:/,$d'
 }
 
 chat_interactive() {
@@ -406,7 +406,7 @@ Assistant:"
             -p "$context" \
             -n 256 \
             --temp 0.7 \
-            --no-display-prompt 2>/dev/null)
+            --no-display-prompt 2>/dev/null | sed '/^Human:/,$d' | sed '/^User:/,$d')
 
         echo "$response"
         echo ""
