@@ -329,7 +329,7 @@ infer() {
     model_path=$(config_get active_model)
 
     if [[ -z "$model_path" || ! -f "$model_path" ]]; then
-        log_error "No model active. Run: pai model install tinyllama"
+        log_error "No model active. Run: pai install qwen2"
         return 1
     fi
 
@@ -337,19 +337,15 @@ infer() {
     local ctx_size=$(config_get ctx_size 2048)
     local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
 
+    # Run inference with simple prompt
     container_run "$container_model" \
         -t "$threads" \
         -c "$ctx_size" \
-        -p "<|im_start|>system
-You are a helpful AI assistant. Give short, direct answers.<|im_end|>
-<|im_start|>user
-$prompt<|im_end|>
-<|im_start|>assistant
-" \
+        -p "User: $prompt
+Assistant:" \
         -n 256 \
         --temp 0.7 \
-        --no-display-prompt \
-        2>/dev/null | sed 's/<|im_end|>.*//g'
+        --no-display-prompt 2>&1 | grep -v "^llama\|^warning\|^main:"
 }
 
 chat_interactive() {
@@ -397,10 +393,8 @@ chat_interactive() {
         fi
 
         # Add current user message
-        context="${context}<|im_start|>user
-$user_input<|im_end|>
-<|im_start|>assistant
-"
+        context="${context}User: $user_input
+Assistant:"
 
         echo -ne "${GREEN}AI>${RESET} "
 
@@ -409,22 +403,17 @@ $user_input<|im_end|>
         response=$(container_run "$container_model" \
             -t "$threads" \
             -c "$ctx_size" \
-            -p "<|im_start|>system
-You are a helpful AI assistant. Give short, direct answers.<|im_end|>
-$context" \
+            -p "$context" \
             -n 256 \
             --temp 0.7 \
-            --no-display-prompt \
-            2>/dev/null | sed 's/<|im_end|>.*//g')
+            --no-display-prompt 2>&1 | grep -v "^llama\|^warning\|^main:" | head -20)
 
         echo "$response"
         echo ""
 
         # Append to history file
-        echo "<|im_start|>user
-$user_input<|im_end|>
-<|im_start|>assistant
-$response<|im_end|>
+        echo "User: $user_input
+Assistant: $response
 " >> "$history_file"
 
         # Trim history to last 4 exchanges (keep file under ~2000 bytes)
