@@ -1,0 +1,64 @@
+# PocketAI Release Workflow
+# Creates a release when a tag is pushed
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release Archive
+        run: |
+          mkdir -p release
+          # Create tarball excluding models and data
+          tar --exclude='models/*.gguf' \
+              --exclude='data/llamafile' \
+              --exclude='data/config' \
+              --exclude='.git' \
+              -czvf release/pocketai-${{ steps.get_version.outputs.VERSION }}.tar.gz \
+              .
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: PocketAI ${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## PocketAI ${{ steps.get_version.outputs.VERSION }}
+
+            Run AI models locally on your Android phone!
+
+            ### Installation
+            ```bash
+            git clone https://github.com/mithun50/PocketAi.git
+            cd PocketAi
+            ./setup.sh
+            ```
+
+            ### Quick Start
+            ```bash
+            source ~/.pocketai_env
+            pai install qwen2-1b
+            pai chat
+            ```
+
+            See [README.md](https://github.com/mithun50/PocketAi#readme) for full documentation.
+          files: |
+            release/pocketai-${{ steps.get_version.outputs.VERSION }}.tar.gz
+          draft: false
+          prerelease: false

@@ -1,0 +1,424 @@
+#!/data/data/com.termux/files/usr/bin/bash
+#
+# pai - PocketAI Command Line Interface
+# Local AI for Android - No cloud, no compilation, just works
+#
+
+set -euo pipefail
+
+# =============================================================================
+# Setup
+# =============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export POCKETAI_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$POCKETAI_ROOT/core/engine.sh"
+
+# =============================================================================
+# Banner
+# =============================================================================
+
+show_banner() {
+    echo -e "${BOLD}${CYAN}"
+    cat << 'EOF'
+    ____             __        __  ___    ____
+   / __ \____  _____/ /_____  / /_/   |  /  _/
+  / /_/ / __ \/ ___/ //_/ _ \/ __/ /| |  / /
+ / ____/ /_/ / /__/ ,< /  __/ /_/ ___ |_/ /
+/_/    \____/\___/_/|_|\___/\__/_/  |_/___/
+EOF
+    echo -e "${RESET}${DIM}  Local AI • No Cloud • Android Native${RESET}"
+    echo ""
+}
+
+# =============================================================================
+# Help System
+# =============================================================================
+
+show_help() {
+    show_banner
+    echo -e "${BOLD}USAGE${RESET}"
+    echo "  pai <command> [options]"
+    echo ""
+    echo -e "${BOLD}COMMANDS${RESET}"
+    echo ""
+    echo -e "  ${CYAN}Setup${RESET}"
+    echo "    init              Initialize PocketAI (first-time setup)"
+    echo "    status            Show system status and info"
+    echo "    doctor            Diagnose and fix common issues"
+    echo ""
+    echo -e "  ${CYAN}Models${RESET}"
+    echo "    models            List available models to download"
+    echo "    models installed  List installed models"
+    echo "    install <model>   Download and install a model"
+    echo "    remove <model>    Remove an installed model"
+    echo "    use <model>       Set the active model"
+    echo ""
+    echo -e "  ${CYAN}Chat${RESET}"
+    echo "    chat              Start interactive chat session"
+    echo "    ask \"<prompt>\"    One-shot question to AI"
+    echo "    complete \"<text>\" Complete the given text"
+    echo ""
+    echo -e "  ${CYAN}Config${RESET}"
+    echo "    config            Show current configuration"
+    echo "    config set <k> <v>  Set a configuration value"
+    echo "    config reset      Reset to defaults"
+    echo ""
+    echo -e "  ${CYAN}Info${RESET}"
+    echo "    help              Show this help message"
+    echo "    version           Show version information"
+    echo "    about             About PocketAI"
+    echo ""
+    echo -e "${BOLD}EXAMPLES${RESET}"
+    echo "  pai init                    # First-time setup"
+    echo "  pai install tinyllama       # Download TinyLlama model"
+    echo "  pai chat                    # Start chatting"
+    echo "  pai ask \"What is AI?\"       # Quick question"
+    echo ""
+    echo -e "${BOLD}MODELS${RESET}"
+    echo "  tinyllama   TinyLlama 1.1B   669MB  (1GB+ RAM)"
+    echo "  qwen        Qwen 0.5B        395MB  (512MB+ RAM)"
+    echo "  phi2        Phi-2 2.7B       1.6GB  (3GB+ RAM)"
+    echo "  stablelm    StableLM 3B      2.0GB  (4GB+ RAM)"
+    echo ""
+}
+
+show_models_help() {
+    log_step "Model Commands"
+    echo ""
+    echo "  pai models              List available models"
+    echo "  pai models installed    List installed models"
+    echo "  pai install <name>      Install a model"
+    echo "  pai remove <name>       Remove a model"
+    echo "  pai use <name>          Set active model"
+    echo ""
+    echo -e "${BOLD}Available Models:${RESET}"
+    echo ""
+    printf "  ${BOLD}%-10s %-20s %-8s %-12s${RESET}\n" "NAME" "DESCRIPTION" "SIZE" "MIN RAM"
+    echo "  ────────────────────────────────────────────────────────"
+    echo "  qwen       Qwen 0.5B           395MB    512MB   (fastest)"
+    echo "  tinyllama  TinyLlama 1.1B      669MB    1GB     (recommended)"
+    echo "  phi2       Phi-2 2.7B          1.6GB    3GB     (smartest)"
+    echo "  stablelm   StableLM 3B         2.0GB    4GB     (balanced)"
+    echo ""
+    echo -e "${DIM}Tip: Start with 'qwen' on low-RAM devices or 'tinyllama' for best balance${RESET}"
+    echo ""
+}
+
+show_version() {
+    echo "PocketAI v${VERSION}"
+    echo "Engine: llamafile ${LLAMAFILE_VERSION}"
+    echo "Platform: $(uname -m) / $(uname -o)"
+}
+
+show_about() {
+    show_banner
+    echo "PocketAI brings AI to your Android device without:"
+    echo "  • Internet connection (fully offline)"
+    echo "  • Cloud subscriptions (free forever)"
+    echo "  • Compilation (just download and run)"
+    echo ""
+    echo "Powered by Mozilla llamafile technology."
+    echo "Models run in secure proot container isolation."
+    echo ""
+    echo "GitHub: https://github.com/pocketai/pocketai"
+    echo "License: MIT"
+    echo ""
+}
+
+# =============================================================================
+# Commands
+# =============================================================================
+
+cmd_init() {
+    show_banner
+    log_step "Initializing PocketAI"
+
+    # Check environment
+    if [[ ! -d "/data/data/com.termux" ]]; then
+        log_warn "Not running in Termux - some features may not work"
+    fi
+
+    # Install dependencies
+    if ! command -v proot-distro &>/dev/null; then
+        log_info "Installing proot-distro..."
+        pkg install -y proot-distro 2>/dev/null || true
+    fi
+
+    # Initialize config and directories
+    config_init
+
+    # Install engine
+    engine_install
+
+    log_step "Setup Complete!"
+    echo ""
+    echo "Next steps:"
+    echo "  1. Install a model:  ${CYAN}pai install tinyllama${RESET}"
+    echo "  2. Start chatting:   ${CYAN}pai chat${RESET}"
+    echo ""
+
+    # Suggest model based on RAM
+    local ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+    if [[ $ram_mb -lt 2000 ]]; then
+        log_info "Low RAM detected. Recommend: ${BOLD}pai install qwen${RESET} (smallest)"
+    elif [[ $ram_mb -lt 4000 ]]; then
+        log_info "Recommend: ${BOLD}pai install tinyllama${RESET} (best balance)"
+    else
+        log_info "Good RAM available. Try: ${BOLD}pai install phi2${RESET} (smartest)"
+    fi
+    echo ""
+}
+
+cmd_status() {
+    show_banner
+    system_info
+}
+
+cmd_doctor() {
+    show_banner
+    log_step "Running Diagnostics"
+    echo ""
+
+    local issues=0
+
+    # Check proot-distro
+    if command -v proot-distro &>/dev/null; then
+        log_success "proot-distro installed"
+    else
+        log_error "proot-distro not found"
+        echo "  Fix: pkg install proot-distro"
+        ((issues++))
+    fi
+
+    # Check container
+    if container_exists; then
+        log_success "Container exists"
+    else
+        log_error "Container not created"
+        echo "  Fix: pai init"
+        ((issues++))
+    fi
+
+    # Check engine
+    if [[ -f "$DATA_DIR/llamafile" ]]; then
+        log_success "Engine binary exists"
+    else
+        log_error "Engine not installed"
+        echo "  Fix: pai init"
+        ((issues++))
+    fi
+
+    # Check model
+    local model=$(config_get active_model)
+    if [[ -n "$model" && -f "$model" ]]; then
+        log_success "Model active: $(basename "$model")"
+    else
+        log_warn "No model active"
+        echo "  Fix: pai install tinyllama"
+        ((issues++))
+    fi
+
+    # Check RAM
+    local ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+    local ram_free=$(free -m | awk '/^Mem:/{print $7}')
+    if [[ $ram_free -gt 500 ]]; then
+        log_success "RAM: ${ram_free}MB free of ${ram_mb}MB"
+    else
+        log_warn "Low RAM: ${ram_free}MB free"
+        echo "  Tip: Close other apps for better performance"
+    fi
+
+    # Check storage
+    local storage_free=$(df "$HOME" 2>/dev/null | tail -1 | awk '{print $4}')
+    local storage_human=$(df -h "$HOME" 2>/dev/null | tail -1 | awk '{print $4}')
+    log_success "Storage: ${storage_human:-unknown} free"
+
+    echo ""
+    if [[ $issues -eq 0 ]]; then
+        log_success "All checks passed!"
+    else
+        log_warn "$issues issue(s) found"
+    fi
+    echo ""
+}
+
+cmd_config() {
+    local subcmd="${1:-show}"
+    shift || true
+
+    case "$subcmd" in
+        show|list)
+            log_step "Configuration"
+            echo ""
+            if [[ -f "$CONFIG_FILE" ]]; then
+                cat "$CONFIG_FILE" | while read -r line; do
+                    [[ "$line" =~ ^# ]] || [[ -z "$line" ]] && continue
+                    echo "  $line"
+                done
+            fi
+            echo ""
+            echo "Config file: $CONFIG_FILE"
+            echo ""
+            ;;
+        set)
+            local key="$1" value="$2"
+            config_set "$key" "$value"
+            log_success "Set $key=$value"
+            ;;
+        get)
+            local key="$1"
+            config_get "$key"
+            ;;
+        reset)
+            rm -f "$CONFIG_FILE"
+            config_init
+            log_success "Configuration reset"
+            ;;
+        *)
+            log_error "Unknown config command: $subcmd"
+            echo "Usage: pai config [show|set|get|reset]"
+            ;;
+    esac
+}
+
+cmd_models() {
+    local subcmd="${1:-available}"
+
+    case "$subcmd" in
+        available|list|"")
+            model_list_available
+            ;;
+        installed)
+            model_list_installed
+            ;;
+        help)
+            show_models_help
+            ;;
+        *)
+            log_error "Unknown models command: $subcmd"
+            echo "Usage: pai models [available|installed|help]"
+            ;;
+    esac
+}
+
+cmd_install() {
+    local model="$1"
+    if [[ -z "$model" ]]; then
+        log_error "Specify a model to install"
+        show_models_help
+        return 1
+    fi
+    model_install "$model"
+}
+
+cmd_remove() {
+    local model="$1"
+    if [[ -z "$model" ]]; then
+        log_error "Specify a model to remove"
+        model_list_installed
+        return 1
+    fi
+    model_remove "$model"
+}
+
+cmd_use() {
+    local model="$1"
+    if [[ -z "$model" ]]; then
+        log_error "Specify a model to use"
+        model_list_installed
+        return 1
+    fi
+    model_activate "$model"
+}
+
+cmd_chat() {
+    if ! engine_installed; then
+        log_error "PocketAI not initialized. Run: pai init"
+        return 1
+    fi
+    chat_interactive
+}
+
+cmd_ask() {
+    local prompt="$1"
+    if [[ -z "$prompt" ]]; then
+        log_error "Provide a question"
+        echo "Usage: pai ask \"What is the meaning of life?\""
+        return 1
+    fi
+
+    if ! engine_installed; then
+        log_error "PocketAI not initialized. Run: pai init"
+        return 1
+    fi
+
+    infer "$prompt"
+}
+
+cmd_complete() {
+    local text="$1"
+    if [[ -z "$text" ]]; then
+        log_error "Provide text to complete"
+        return 1
+    fi
+
+    if ! engine_installed; then
+        log_error "PocketAI not initialized. Run: pai init"
+        return 1
+    fi
+
+    # Simple completion without chat template
+    local model_path=$(config_get active_model)
+    local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
+
+    container_run "$container_model" \
+        -t "$(config_get threads 4)" \
+        -p "$text" \
+        -n 128 \
+        --no-display-prompt \
+        2>/dev/null
+}
+
+# =============================================================================
+# Main Router
+# =============================================================================
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+
+    case "$cmd" in
+        # Setup
+        init|setup)     cmd_init ;;
+        status|info)    cmd_status ;;
+        doctor|check)   cmd_doctor ;;
+
+        # Models
+        models|model)   cmd_models "$@" ;;
+        install|add)    cmd_install "$@" ;;
+        remove|rm|del)  cmd_remove "$@" ;;
+        use|activate)   cmd_use "$@" ;;
+
+        # Chat
+        chat|talk)      cmd_chat ;;
+        ask|query|q)    cmd_ask "$@" ;;
+        complete)       cmd_complete "$@" ;;
+
+        # Config
+        config|cfg)     cmd_config "$@" ;;
+
+        # Info
+        help|-h|--help) show_help ;;
+        version|-v)     show_version ;;
+        about)          show_about ;;
+
+        *)
+            log_error "Unknown command: $cmd"
+            echo "Run 'pai help' for usage"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

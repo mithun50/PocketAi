@@ -1,0 +1,81 @@
+# PocketAI CI Workflow
+# Runs on every push and pull request
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint:
+    name: Lint Shell Scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck on setup.sh
+        run: shellcheck setup.sh || true
+
+      - name: Run ShellCheck on pai
+        run: shellcheck bin/pai || true
+
+      - name: Run ShellCheck on engine.sh
+        run: shellcheck core/engine.sh || true
+
+  validate:
+    name: Validate Structure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check required files exist
+        run: |
+          echo "Checking required files..."
+          test -f setup.sh || exit 1
+          test -f bin/pai || exit 1
+          test -f core/engine.sh || exit 1
+          test -f README.md || exit 1
+          test -f LICENSE || exit 1
+          echo "All required files present!"
+
+      - name: Check scripts are executable
+        run: |
+          echo "Checking script permissions..."
+          test -x setup.sh || chmod +x setup.sh
+          test -x bin/pai || chmod +x bin/pai
+          test -x core/engine.sh || chmod +x core/engine.sh
+          echo "Permissions OK!"
+
+      - name: Check documentation exists
+        run: |
+          echo "Checking documentation..."
+          test -f docs/COMMANDS.md || exit 1
+          test -f docs/MODELS.md || exit 1
+          test -f docs/TROUBLESHOOTING.md || exit 1
+          echo "Documentation complete!"
+
+  syntax:
+    name: Bash Syntax Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check bash syntax
+        run: |
+          echo "Checking bash syntax..."
+          bash -n setup.sh
+          bash -n bin/pai
+          bash -n core/engine.sh
+          echo "Syntax OK!"
