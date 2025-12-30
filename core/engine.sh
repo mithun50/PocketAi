@@ -370,9 +370,10 @@ chat_interactive() {
     local ctx_size=$(config_get ctx_size 2048)
     local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
 
-    # Conversation history array
-    declare -a history=()
-    local max_history=8  # 4 exchanges (user+assistant pairs)
+    # Use temp file for history (works on all bash versions)
+    local history_file="/tmp/pocketai_history_$$"
+    echo -n "" > "$history_file"
+    trap "rm -f '$history_file'" EXIT
 
     while true; do
         echo -ne "${CYAN}You>${RESET} "
@@ -384,19 +385,19 @@ chat_interactive() {
 
         # Clear history command
         if [[ "$user_input" == "/clear" ]]; then
-            history=()
+            echo -n "" > "$history_file"
             log_success "Context cleared"
             continue
         fi
 
-        # Build conversation context from history
+        # Read history and build context
         local context=""
-        for msg in "${history[@]}"; do
-            context+="$msg"
-        done
+        if [[ -s "$history_file" ]]; then
+            context=$(cat "$history_file")
+        fi
 
         # Add current user message
-        context+="<|im_start|>user
+        context="${context}<|im_start|>user
 $user_input<|im_end|>
 <|im_start|>assistant
 "
@@ -419,20 +420,21 @@ $context" \
         echo "$response"
         echo ""
 
-        # Add to history
-        history+=("<|im_start|>user
+        # Append to history file
+        echo "<|im_start|>user
 $user_input<|im_end|>
-")
-        history+=("<|im_start|>assistant
+<|im_start|>assistant
 $response<|im_end|>
-")
+" >> "$history_file"
 
-        # Trim history if too long (keep last max_history entries)
-        while [[ ${#history[@]} -gt $max_history ]]; do
-            history=("${history[@]:2}")  # Remove oldest pair
-        done
+        # Trim history to last 4 exchanges (keep file under ~2000 bytes)
+        if [[ $(wc -c < "$history_file") -gt 2000 ]]; then
+            tail -c 1500 "$history_file" > "${history_file}.tmp"
+            mv "${history_file}.tmp" "$history_file"
+        fi
     done
 
+    rm -f "$history_file"
     echo ""
     log_info "Chat ended"
 }
