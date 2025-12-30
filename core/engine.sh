@@ -362,12 +362,17 @@ chat_interactive() {
     fi
 
     log_info "Chat with $(basename "$model_path")"
-    log_info "Type your message, press Enter. Type 'exit' or Ctrl+C to quit."
+    log_info "Commands: 'exit' to quit, '/clear' to reset context"
+    log_info "Context: Remembers last 4 exchanges"
     echo ""
 
     local threads=$(config_get threads 4)
     local ctx_size=$(config_get ctx_size 2048)
     local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
+
+    # Conversation history array
+    declare -a history=()
+    local max_history=8  # 4 exchanges (user+assistant pairs)
 
     while true; do
         echo -ne "${CYAN}You>${RESET} "
@@ -377,23 +382,55 @@ chat_interactive() {
         [[ -z "$user_input" ]] && continue
         [[ "$user_input" == "exit" || "$user_input" == "quit" || "$user_input" == "/exit" ]] && break
 
+        # Clear history command
+        if [[ "$user_input" == "/clear" ]]; then
+            history=()
+            log_success "Context cleared"
+            continue
+        fi
+
+        # Build conversation context from history
+        local context=""
+        for msg in "${history[@]}"; do
+            context+="$msg"
+        done
+
+        # Add current user message
+        context+="<|im_start|>user
+$user_input<|im_end|>
+<|im_start|>assistant
+"
+
         echo -ne "${GREEN}AI>${RESET} "
 
-        container_run "$container_model" \
+        # Get response and capture it
+        local response
+        response=$(container_run "$container_model" \
             -t "$threads" \
             -c "$ctx_size" \
             -p "<|im_start|>system
 You are a helpful AI assistant. Give short, direct answers.<|im_end|>
-<|im_start|>user
-$user_input<|im_end|>
-<|im_start|>assistant
-" \
+$context" \
             -n 256 \
             --temp 0.7 \
             --no-display-prompt \
-            2>/dev/null | sed 's/<|im_end|>.*//g'
+            2>/dev/null | sed 's/<|im_end|>.*//g')
 
+        echo "$response"
         echo ""
+
+        # Add to history
+        history+=("<|im_start|>user
+$user_input<|im_end|>
+")
+        history+=("<|im_start|>assistant
+$response<|im_end|>
+")
+
+        # Trim history if too long (keep last max_history entries)
+        while [[ ${#history[@]} -gt $max_history ]]; do
+            history=("${history[@]:2}")  # Remove oldest pair
+        done
     done
 
     echo ""
