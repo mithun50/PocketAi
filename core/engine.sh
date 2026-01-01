@@ -357,9 +357,7 @@ infer() {
         container_run "$container_model" \
             -t "$threads" \
             -c "$ctx_size" \
-            -p "<|im_start|>system
-You are a helpful assistant. Always respond in English only.<|im_end|>
-<|im_start|>user
+            -p "<|im_start|>user
 $prompt<|im_end|>
 <|im_start|>assistant
 " \
@@ -377,9 +375,7 @@ $prompt<|im_end|>
         container_run "$container_model" \
             -t "$threads" \
             -c "$ctx_size" \
-            -p "<|im_start|>system
-RULES: Answer in 1-2 sentences MAX. No questions back. No offers to help more. Just answer directly.<|im_end|>
-<|im_start|>user
+            -p "<|im_start|>user
 $prompt<|im_end|>
 <|im_start|>assistant
 " \
@@ -502,9 +498,7 @@ chat_interactive() {
 
         # Qwen3-specific chat (no token limit, uses stop sequences)
         if [[ "$model_name" == *"qwen3"* ]]; then
-            local context="<|im_start|>system
-You are a helpful assistant.<|im_end|>
-${history}<|im_start|>user
+            local context="${history}<|im_start|>user
 $user_input<|im_end|>
 <|im_start|>assistant
 "
@@ -528,9 +522,7 @@ $user_input<|im_end|>
             echo "$clean_response" > "$response_file"
         else
             # Original parameters for other models
-            local context="<|im_start|>system
-RULES: Answer in 1-2 sentences MAX. No questions back. No offers to help more. Just answer directly.<|im_end|>
-${history}<|im_start|>user
+            local context="${history}<|im_start|>user
 $user_input<|im_end|>
 <|im_start|>assistant
 "

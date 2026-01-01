@@ -24,13 +24,18 @@ def run_cmd(cmd):
 
 class APIHandler(http.server.BaseHTTPRequestHandler):
     def send_json(self, data, status=200):
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
+        try:
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode())
+        except BrokenPipeError:
+            pass  # Client disconnected, ignore
+        except ConnectionResetError:
+            pass  # Connection reset, ignore
 
     def do_OPTIONS(self):
         self.send_json({})
@@ -148,16 +153,19 @@ class CombinedHandler(APIHandler):
         file_path = os.path.join(web_dir, path.lstrip('/'))
 
         if os.path.isfile(file_path):
-            self.send_response(200)
-            if file_path.endswith('.html'):
-                self.send_header('Content-Type', 'text/html')
-            elif file_path.endswith('.js'):
-                self.send_header('Content-Type', 'application/javascript')
-            elif file_path.endswith('.css'):
-                self.send_header('Content-Type', 'text/css')
-            self.end_headers()
-            with open(file_path, 'rb') as f:
-                self.wfile.write(f.read())
+            try:
+                self.send_response(200)
+                if file_path.endswith('.html'):
+                    self.send_header('Content-Type', 'text/html')
+                elif file_path.endswith('.js'):
+                    self.send_header('Content-Type', 'application/javascript')
+                elif file_path.endswith('.css'):
+                    self.send_header('Content-Type', 'text/css')
+                self.end_headers()
+                with open(file_path, 'rb') as f:
+                    self.wfile.write(f.read())
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # Client disconnected, ignore
         else:
             self.send_json({'error': 'Not found'}, 404)
 
