@@ -635,6 +635,7 @@ cmd_uninstall() {
     local shell_rc="$HOME/.bashrc"
     if [[ -f "$shell_rc" ]]; then
         log_info "Cleaning ~/.bashrc..."
+        # Remove PocketAI related lines
         sed -i '/# PocketAI/d' "$shell_rc" 2>/dev/null || true
         sed -i '/pocketai_env/d' "$shell_rc" 2>/dev/null || true
         sed -i '/# Auto-start PocketAI/d' "$shell_rc" 2>/dev/null || true
@@ -642,6 +643,11 @@ cmd_uninstall() {
         sed -i '/pai api web/d' "$shell_rc" 2>/dev/null || true
         sed -i '/PocketAI API started/d' "$shell_rc" 2>/dev/null || true
         sed -i '/alias pai=/d' "$shell_rc" 2>/dev/null || true
+        # Clean up orphaned if/fi from auto-start block
+        sed -i '/^if ! pgrep.*then$/d' "$shell_rc" 2>/dev/null || true
+        sed -i '/^[[:space:]]*fi$/d' "$shell_rc" 2>/dev/null || true
+        # Remove empty lines at start of file
+        sed -i '/./,$!d' "$shell_rc" 2>/dev/null || true
         log_success "Cleaned ~/.bashrc"
     fi
 
