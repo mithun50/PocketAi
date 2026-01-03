@@ -311,25 +311,22 @@ setup_model() {
 show_summary() {
     log_step "Setup Complete!"
 
+    # Auto-source for current session
+    source "$ENV_FILE" 2>/dev/null || true
+    log_success "Environment activated"
+
     echo ""
     echo -e "${BOLD}PocketAI is ready!${RESET}"
-    echo ""
-    echo -e "To activate now, run:"
-    echo ""
-    echo -e "  ${CYAN}source ~/.pocketai_env${RESET}"
-    echo ""
-    echo "Or restart your terminal."
     echo ""
     echo -e "${BOLD}Quick Start:${RESET}"
     echo "  pai help              # Show all commands"
     echo "  pai models            # List available models"
-    echo "  pai install tinyllama # Download a model"
+    echo "  pai install qwen2     # Download a model"
     echo "  pai chat              # Start chatting"
+    echo "  pai api web           # Start API server"
     echo ""
-
-    # Auto-source for current session
-    echo -e "${DIM}Activating for current session...${RESET}"
-    source "$ENV_FILE" 2>/dev/null || true
+    echo -e "${DIM}Note: Run 'source ~/.pocketai_env' in new terminals${RESET}"
+    echo ""
 }
 
 # =============================================================================
