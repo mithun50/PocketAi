@@ -12,9 +12,11 @@ models/*.bin
 # Runtime Data
 # =============================================================================
 data/llamafile
-data/llamafile-container
+data/llamafile-*
 data/config
 data/api.pid
+stream_out.txt
+*.out
 
 # =============================================================================
 # Logs and Debug

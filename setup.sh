@@ -115,6 +115,15 @@ install_dependencies() {
         pkg install -y curl
         log_success "curl installed"
     fi
+
+    # Install python3 (required for API server)
+    if command -v python3 &>/dev/null; then
+        log_success "python3 ready"
+    else
+        log_info "Installing python3..."
+        pkg install -y python
+        log_success "python3 installed"
+    fi
 }
 
 # =============================================================================
