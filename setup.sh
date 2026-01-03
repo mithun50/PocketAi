@@ -221,6 +221,19 @@ EOF
         log_success "Already in $SHELL_RC"
     fi
 
+    # Add API auto-start on Termux launch
+    if ! grep -q "pai api web" "$SHELL_RC" 2>/dev/null; then
+        echo '' >> "$SHELL_RC"
+        echo '# Auto-start PocketAI API server' >> "$SHELL_RC"
+        echo 'if [[ -z "$(pgrep -f api_server.py)" ]]; then' >> "$SHELL_RC"
+        echo '    pai api web &>/dev/null &' >> "$SHELL_RC"
+        echo '    echo "PocketAI API started in background"' >> "$SHELL_RC"
+        echo 'fi' >> "$SHELL_RC"
+        log_success "API auto-start enabled"
+    else
+        log_success "API auto-start already configured"
+    fi
+
     # Export for current session
     export POCKETAI_ROOT="$POCKETAI_ROOT"
     export PATH="$POCKETAI_ROOT/bin:$PATH"
