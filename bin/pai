@@ -586,6 +586,7 @@ cmd_uninstall() {
     echo "  • Downloaded models"
     echo "  • Configuration files"
     echo "  • Environment settings from ~/.bashrc"
+    echo "  • PocketAI installation folder ($POCKETAI_ROOT)"
     echo ""
     echo -n "Are you sure? [y/N]: "
     read -r confirm
@@ -594,6 +595,9 @@ cmd_uninstall() {
         log_info "Cancelled"
         return 0
     fi
+
+    # Store root path before we delete it
+    local pocketai_root="$POCKETAI_ROOT"
 
     # Stop API server
     if pgrep -f api_server.py &>/dev/null; then
@@ -637,13 +641,24 @@ cmd_uninstall() {
         sed -i '/pgrep -f api_server.py/d' "$shell_rc" 2>/dev/null || true
         sed -i '/pai api web/d' "$shell_rc" 2>/dev/null || true
         sed -i '/PocketAI API started/d' "$shell_rc" 2>/dev/null || true
+        sed -i '/alias pai=/d' "$shell_rc" 2>/dev/null || true
         log_success "Cleaned ~/.bashrc"
     fi
 
-    log_step "Uninstall Complete!"
+    # Remove pai alias from current session
+    unalias pai 2>/dev/null || true
+
+    # Remove PocketAI installation folder
+    log_info "Removing PocketAI installation folder..."
+    cd "$HOME"  # Move out of the directory before deleting
+    rm -rf "$pocketai_root" 2>/dev/null || true
+    log_success "Installation folder removed"
+
     echo ""
-    echo -e "${DIM}Note: PocketAI source files remain in $POCKETAI_ROOT${RESET}"
-    echo -e "${DIM}To fully remove, run: rm -rf $POCKETAI_ROOT${RESET}"
+    echo -e "${GREEN}${BOLD}Uninstall Complete!${RESET}"
+    echo ""
+    echo "PocketAI has been completely removed from your system."
+    echo "Thank you for using PocketAI!"
     echo ""
 }
 
