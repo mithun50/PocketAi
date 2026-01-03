@@ -272,6 +272,24 @@ def kill_process_tree(pid):
     except:
         pass
 
+def decode_utf8_safe(data, leftover=b''):
+    """Decode UTF-8 bytes safely, handling incomplete multi-byte sequences"""
+    combined = leftover + data
+    try:
+        # Try to decode everything
+        return combined.decode('utf-8'), b''
+    except UnicodeDecodeError:
+        # Find where the incomplete sequence starts
+        # UTF-8 continuation bytes start with 10xxxxxx (0x80-0xBF)
+        # Start bytes: 0xxxxxxx (ASCII), 110xxxxx (2-byte), 1110xxxx (3-byte), 11110xxx (4-byte)
+        for i in range(1, min(4, len(combined) + 1)):
+            try:
+                return combined[:-i].decode('utf-8'), combined[-i:]
+            except UnicodeDecodeError:
+                continue
+        # If all else fails, replace bad bytes
+        return combined.decode('utf-8', errors='replace'), b''
+
 def run_cmd_stream(cmd, timeout=300):
     """Run shell command and yield output in real-time using PTY"""
     import pty
@@ -282,6 +300,7 @@ def run_cmd_stream(cmd, timeout=300):
     slave_fd = None
     process = None
     start_time = time.time()
+    utf8_buffer = b''  # Buffer for incomplete UTF-8 sequences
 
     try:
         with _lock:
@@ -325,7 +344,10 @@ def run_cmd_stream(cmd, timeout=300):
                     if data:
                         token_count += len(data)
                         last_data_time = now
-                        yield data.decode('utf-8', errors='replace')
+                        # Safely decode UTF-8, preserving incomplete sequences for next read
+                        text, utf8_buffer = decode_utf8_safe(data, utf8_buffer)
+                        if text:
+                            yield text
                     else:
                         log_debug("EOF on master_fd")
                         break
@@ -342,13 +364,18 @@ def run_cmd_stream(cmd, timeout=300):
                             if ready:
                                 data = os.read(master_fd, 4096)
                                 if data:
-                                    yield data.decode('utf-8', errors='replace')
+                                    text, utf8_buffer = decode_utf8_safe(data, utf8_buffer)
+                                    if text:
+                                        yield text
                                 else:
                                     break
                             else:
                                 break
                     except OSError:
                         pass
+                    # Yield any remaining buffered data
+                    if utf8_buffer:
+                        yield utf8_buffer.decode('utf-8', errors='replace')
                     break
 
         duration = time.time() - start_time
