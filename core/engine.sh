@@ -273,23 +273,162 @@ model_install() {
         [[ ! "$response" =~ ^[Yy] ]] && return 1
     fi
 
+    # Check if already installed and valid
     if [[ -f "$filepath" ]]; then
-        log_success "Model already installed: $filename"
-        return 0
+        log_info "Verifying existing model..."
+        if model_verify_file "$filepath" "quick"; then
+            log_success "Model already installed and verified: $filename"
+            return 0
+        else
+            log_warn "Existing model file is corrupted, re-downloading..."
+            rm -f "$filepath"
+        fi
     fi
 
     log_step "Installing $desc"
-    log_info "Downloading $filename ($size)..."
 
-    curl -L --progress-bar -o "$filepath" "$url"
+    # Download with retry logic
+    local max_retries=3
+    local retry=0
+    local download_success=false
 
-    log_success "Model installed: $filename"
+    while [[ $retry -lt $max_retries ]]; do
+        ((retry++))
+
+        if [[ $retry -gt 1 ]]; then
+            log_warn "Retry $retry of $max_retries..."
+            sleep 2
+        fi
+
+        log_info "Downloading $filename ($size)..."
+
+        # Use -C - for resume support, --retry for transient failures
+        if curl -L -C - --retry 3 --retry-delay 5 --progress-bar -o "$filepath" "$url"; then
+            log_info "Verifying download..."
+            if model_verify_file "$filepath" "full"; then
+                download_success=true
+                break
+            else
+                log_error "Download verification failed (corrupted or incomplete)"
+                rm -f "$filepath"
+            fi
+        else
+            log_error "Download failed"
+            rm -f "$filepath"
+        fi
+    done
+
+    if [[ "$download_success" != "true" ]]; then
+        log_error "Failed to download model after $max_retries attempts"
+        log_info "Tips:"
+        log_info "  - Check your internet connection"
+        log_info "  - Try again: pai install $name"
+        log_info "  - Free up storage space"
+        return 1
+    fi
+
+    log_success "Model installed and verified: $filename"
 
     # Auto-activate if first model
     if [[ -z "$(config_get active_model)" ]]; then
         config_set active_model "$filepath"
         log_info "Model activated"
     fi
+}
+
+# Verify model file integrity
+# Usage: model_verify_file <filepath> [quick|full]
+model_verify_file() {
+    local filepath="$1"
+    local mode="${2:-quick}"
+
+    # Check file exists
+    if [[ ! -f "$filepath" ]]; then
+        log_error "File not found: $filepath"
+        return 1
+    fi
+
+    # Check minimum file size (at least 50MB for any valid model)
+    local filesize
+    filesize=$(stat -c%s "$filepath" 2>/dev/null || stat -f%z "$filepath" 2>/dev/null || echo "0")
+    if [[ $filesize -lt 50000000 ]]; then
+        log_error "File too small: $(numfmt --to=iec $filesize 2>/dev/null || echo "${filesize} bytes") (minimum 50MB expected)"
+        return 1
+    fi
+
+    # Verify GGUF magic bytes (0x47475546 = "GGUF" in little-endian)
+    local magic
+    magic=$(head -c 4 "$filepath" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')
+    if [[ "$magic" != "47475546" ]]; then
+        log_error "Invalid file format (not a valid GGUF file)"
+        return 1
+    fi
+
+    # Quick mode: just check magic and size
+    if [[ "$mode" == "quick" ]]; then
+        return 0
+    fi
+
+    # Full mode: try loading with llamafile
+    if container_exists && [[ -f "$DATA_DIR/llamafile" ]]; then
+        log_info "Testing model load..."
+        local container_model="$CONTAINER_MODELS/$(basename "$filepath")"
+        local test_output
+        test_output=$(proot-distro login "$CONTAINER_NAME" \
+            --bind "$POCKETAI_ROOT/data:/opt/pocketai/data" \
+            --bind "$POCKETAI_ROOT/models:/opt/pocketai/models" \
+            -- "$CONTAINER_BIN" -m "$container_model" -p "test" -n 1 --log-disable 2>&1 || true)
+
+        if echo "$test_output" | grep -qi "corrupt\|incomplete\|failed to load\|not within.*bounds"; then
+            log_error "Model file is corrupted (load test failed)"
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+# Verify all installed models
+model_verify_all() {
+    log_step "Verifying Installed Models"
+    echo ""
+
+    local found=0
+    local valid=0
+    local invalid=0
+
+    for f in "$MODELS_DIR"/*.gguf; do
+        [[ -f "$f" ]] || continue
+        found=$((found + 1))
+
+        local name=$(basename "$f")
+        local size=$(du -h "$f" | cut -f1)
+
+        echo -n "  Checking $name ($size)... "
+
+        if model_verify_file "$f" "quick"; then
+            echo -e "${GREEN}OK${RESET}"
+            valid=$((valid + 1))
+        else
+            echo -e "${RED}CORRUPTED${RESET}"
+            invalid=$((invalid + 1))
+        fi
+    done
+
+    echo ""
+    if [[ $found -eq 0 ]]; then
+        log_info "No models installed"
+    else
+        log_info "Results: $valid valid, $invalid corrupted, $found total"
+        if [[ $invalid -gt 0 ]]; then
+            echo ""
+            log_warn "Remove corrupted models with: pai remove <model>"
+            log_info "Re-download with: pai install <model>"
+        fi
+    fi
+    echo ""
+
+    [[ $invalid -eq 0 ]]
 }
 
 model_activate() {
@@ -382,6 +521,7 @@ infer() {
     # Run inference with model-specific settings
     if [[ "$family" == "qwen3" ]]; then
         # Qwen3: No token limit, handle thinking blocks
+        # Strip <think>...</think> if present (multiline), otherwise output everything
         eval container_run '"$container_model"' \
             -t '"$threads"' \
             -c '"$ctx_size"' \
@@ -390,7 +530,8 @@ infer() {
             $stop_args \
             --log-disable \
             --no-display-prompt 2>/dev/null | \
-            awk 'BEGIN{RS="</think>"} NR==2{gsub(/^[[:space:]]+/,""); print}' | \
+            awk 'BEGIN{skip=0} /<think>/{skip=1} /<\/think>/{skip=0; sub(/.*<\/think>/, ""); if(length>0) print; next} !skip{print}' | \
+            sed 's/^[[:space:]]*//' | \
             clean_response
     else
         # Other models: Use token limit
@@ -848,6 +989,7 @@ chat_interactive() {
 
         if [[ "$family" == "qwen3" ]]; then
             # Qwen3: No token limit, handle thinking blocks
+            # Strip <think>...</think> if present (multiline), otherwise output everything
             eval container_run '"$container_model"' \
                 -t '"$threads"' \
                 -c '"$ctx_size"' \
@@ -855,16 +997,10 @@ chat_interactive() {
                 $model_args \
                 $stop_args \
                 --log-disable \
-                --no-display-prompt 2>/dev/null > "$response_file"
-
-            # Strip thinking block and display
-            if grep -q '</think>' "$response_file"; then
-                sed -n '/<\/think>/,$ p' "$response_file" | sed '1d' | clean_response | tee "${response_file}.clean"
-                mv "${response_file}.clean" "$response_file"
-            else
-                cat "$response_file" | clean_response | tee "${response_file}.clean"
-                mv "${response_file}.clean" "$response_file"
-            fi
+                --no-display-prompt 2>/dev/null | \
+                awk 'BEGIN{skip=0} /<think>/{skip=1} /<\/think>/{skip=0; sub(/.*<\/think>/, ""); if(length>0) print; next} !skip{print}' | \
+                sed 's/^[[:space:]]*//' | \
+                clean_response | tee "$response_file"
         else
             # Other models: Use token limit
             local token_arg=""
@@ -1561,7 +1697,7 @@ system_info() {
 export -f config_get config_set
 export -f container_exists container_create container_exec container_run
 export -f engine_installed engine_install engine_version
-export -f model_list_available model_list_installed model_install model_activate model_remove
+export -f model_list_available model_list_installed model_install model_activate model_remove model_verify_file model_verify_all
 export -f get_model_family build_prompt build_history_entry get_model_args get_stop_sequences clean_response
 export -f infer infer_stream chat_interactive system_info
 export -f server_start server_stop server_status server_info

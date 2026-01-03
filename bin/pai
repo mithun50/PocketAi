@@ -55,6 +55,7 @@ show_help() {
     echo "    install <model>   Download and install a model"
     echo "    remove <model>    Remove an installed model"
     echo "    use <model>       Set the active model"
+    echo "    verify            Verify all installed models integrity"
     echo ""
     echo -e "  ${CYAN}Chat${RESET}"
     echo "    chat              Start interactive chat session"
@@ -76,6 +77,11 @@ show_help() {
     echo "    config            Show current configuration"
     echo "    config set <k> <v>  Set a configuration value"
     echo "    config reset      Reset to defaults"
+    echo ""
+    echo -e "  ${CYAN}Autostart${RESET}"
+    echo "    autostart         Show autostart status"
+    echo "    autostart enable  Enable API auto-start on Termux launch"
+    echo "    autostart disable Disable API auto-start"
     echo ""
     echo -e "  ${CYAN}Info${RESET}"
     echo "    help              Show this help message"
@@ -345,6 +351,14 @@ cmd_use() {
     model_activate "$model"
 }
 
+cmd_verify() {
+    if ! engine_installed; then
+        log_error "PocketAI not initialized. Run: pai init"
+        return 1
+    fi
+    model_verify_all
+}
+
 cmd_chat() {
     if ! engine_installed; then
         log_error "PocketAI not initialized. Run: pai init"
@@ -573,6 +587,94 @@ cmd_api() {
 }
 
 # =============================================================================
+# Autostart Management
+# =============================================================================
+
+cmd_autostart() {
+    local subcmd="${1:-status}"
+    local shell_rc="$HOME/.bashrc"
+
+    case "$subcmd" in
+        enable|on)
+            # Check if already enabled
+            if grep -q "Auto-start PocketAI" "$shell_rc" 2>/dev/null; then
+                log_info "Autostart already enabled"
+                return 0
+            fi
+
+            # Add autostart block
+            cat >> "$shell_rc" << 'EOF'
+
+# Auto-start PocketAI API server
+if [[ -z "$(pgrep -f api_server.py)" ]]; then
+    pai api web &>/dev/null &
+    echo "PocketAI API started in background"
+fi
+EOF
+            log_success "Autostart enabled"
+            log_info "API will start automatically on next Termux launch"
+            ;;
+
+        disable|off|stop)
+            if ! grep -q "Auto-start PocketAI" "$shell_rc" 2>/dev/null; then
+                log_info "Autostart already disabled"
+                return 0
+            fi
+
+            # Remove autostart block from bashrc
+            sed -i '/# Auto-start PocketAI/d' "$shell_rc" 2>/dev/null || true
+            sed -i '/pgrep -f api_server.py/d' "$shell_rc" 2>/dev/null || true
+            sed -i '/pai api web/d' "$shell_rc" 2>/dev/null || true
+            sed -i '/PocketAI API started/d' "$shell_rc" 2>/dev/null || true
+            # Clean up orphaned if/fi
+            sed -i '/^if \[\[ -z "\$(pgrep/d' "$shell_rc" 2>/dev/null || true
+            sed -i '/^fi$/d' "$shell_rc" 2>/dev/null || true
+            # Remove empty lines at end
+            sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$shell_rc" 2>/dev/null || true
+
+            log_success "Autostart disabled"
+            log_info "API will no longer start automatically"
+
+            # Also stop currently running API if requested
+            if pgrep -f api_server.py &>/dev/null; then
+                echo ""
+                echo -n "Stop currently running API? [y/N]: "
+                read -r confirm
+                if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                    pkill -f api_server.py 2>/dev/null || true
+                    log_success "API stopped"
+                fi
+            fi
+            ;;
+
+        status)
+            echo ""
+            if grep -q "Auto-start PocketAI" "$shell_rc" 2>/dev/null; then
+                log_success "Autostart: ${GREEN}enabled${RESET}"
+            else
+                log_info "Autostart: ${YELLOW}disabled${RESET}"
+            fi
+
+            if pgrep -f api_server.py &>/dev/null; then
+                log_success "API server: ${GREEN}running${RESET}"
+            else
+                log_info "API server: ${YELLOW}stopped${RESET}"
+            fi
+            echo ""
+            echo "Commands:"
+            echo "  pai autostart enable   - Enable auto-start on Termux launch"
+            echo "  pai autostart disable  - Disable auto-start"
+            echo ""
+            ;;
+
+        *)
+            log_error "Unknown autostart command: $subcmd"
+            echo "Usage: pai autostart [enable|disable|status]"
+            ;;
+    esac
+}
+
+# =============================================================================
 # Uninstall
 # =============================================================================
 
@@ -689,6 +791,7 @@ main() {
         install|add)    cmd_install "$@" ;;
         remove|rm|del)  cmd_remove "$@" ;;
         use|activate)   cmd_use "$@" ;;
+        verify)         cmd_verify ;;
 
         # Chat
         chat|talk)      cmd_chat ;;
@@ -701,6 +804,9 @@ main() {
 
         # Config
         config|cfg)     cmd_config "$@" ;;
+
+        # Autostart
+        autostart)      cmd_autostart "$@" ;;
 
         # Info
         help|-h|--help) show_help ;;

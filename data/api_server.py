@@ -546,6 +546,12 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     log_error(f"Config read failed: {e}")
                 self.send_json(config)
 
+            elif path == '/api/models/verify':
+                # GET: Verify all models
+                log_info(f"[REQ-{req_id}] Verifying all models (GET)")
+                out, ok = run_cmd('model_verify_all', timeout=120)
+                self.send_json({'success': ok, 'message': out})
+
             else:
                 self.send_json({'error': 'Not found'}, 404)
 
@@ -588,6 +594,18 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 ok, msg = activate_model_fast(model)
                 log_info(f"[REQ-{req_id}] Activation result: {ok} - {msg}")
                 self.send_json({'success': ok, 'message': msg})
+
+            elif path == '/api/models/verify':
+                model = data.get('model', '')
+                log_info(f"[REQ-{req_id}] Verifying model: {model or 'all'}")
+                if model:
+                    # Verify specific model
+                    out, ok = run_cmd(f'model_verify_file "$MODELS_DIR"/*{model}*.gguf quick', timeout=30)
+                    self.send_json({'success': ok, 'message': 'Model verified' if ok else 'Model corrupted or not found'})
+                else:
+                    # Verify all models
+                    out, ok = run_cmd('model_verify_all', timeout=120)
+                    self.send_json({'success': ok, 'message': out})
 
             elif path == '/api/chat':
                 message = data.get('message', '')
