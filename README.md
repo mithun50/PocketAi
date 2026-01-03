@@ -23,6 +23,7 @@
 - **Private & Secure** - Your data never leaves your device
 - **Android Native** - Optimized for mobile with proot isolation
 - **Multiple Models** - Choose from tiny (270MB) to powerful (2GB+)
+- **Smart Prompting** - Model-specific templates for optimal responses
 - **Web Dashboard** - Browser-based UI for easy management
 - **REST API** - Full control via HTTP endpoints
 - **OpenAI Compatible** - Drop-in replacement for OpenAI API
@@ -120,15 +121,31 @@ Open http://localhost:8081/ in your browser for the web dashboard.
 **API Endpoints:**
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/health` | Health check |
-| GET | `/api/status` | System status |
+| GET | `/api/health` | Health check (instant, no shell calls) |
+| GET | `/api/status` | System status (cached, 30s TTL) |
 | GET | `/api/models` | Available models |
 | GET | `/api/models/installed` | Installed models |
 | POST | `/api/models/install` | Install model |
 | POST | `/api/models/use` | Switch model |
-| POST | `/api/chat` | Send message |
+| POST | `/api/chat` | Send message (blocking, returns full response) |
+| POST | `/api/chat/stream` | Send message (SSE streaming, real-time tokens) |
 | GET | `/api/config` | Get config |
 | POST | `/api/config` | Set config |
+
+**Streaming vs Blocking:**
+- `/api/chat` - Waits for complete response, returns JSON `{"response": "..."}`
+- `/api/chat/stream` - Returns tokens in real-time via Server-Sent Events (SSE)
+
+**Both endpoints accept:**
+```json
+{"message": "Your question", "max_tokens": 500}
+```
+> **Note:** Default is only 150 tokens. For longer responses, set `max_tokens` higher.
+
+**Performance Optimizations:**
+- `/api/health` - Instant response, no shell commands (use for polling)
+- `/api/status` - Cached for 30 seconds to reduce shell command overhead
+- Streaming uses PTY for unbuffered real-time token delivery
 
 ### Configuration
 
@@ -148,6 +165,7 @@ pai config reset         # Reset to defaults
 ```bash
 pai status               # System information
 pai doctor               # Diagnose issues
+pai update               # Update PocketAI from GitHub
 pai help                 # Show all commands
 pai version              # Version info
 ```

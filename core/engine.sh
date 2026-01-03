@@ -331,72 +331,134 @@ model_remove() {
 
 infer() {
     local prompt="$1"
+    local requested_tokens="${2:-}"  # Optional: override max_tokens
     local model_path
     model_path=$(config_get active_model)
 
     if [[ -z "$model_path" || ! -f "$model_path" ]]; then
-        log_error "No model active. Run: pai install qwen2"
+        log_error "No model active. Run: pai install qwen3"
         return 1
     fi
 
     local threads=$(config_get threads 4)
     local ctx_size=$(config_get ctx_size 2048)
     local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
-    local model_name=$(basename "$model_path" | tr '[:upper:]' '[:lower:]')
+    local model_name=$(basename "$model_path")
+    local family=$(get_model_family "$model_name")
+
+    # Build model-specific prompt
+    local formatted_prompt=$(build_prompt "$model_name" "$prompt")
 
     # Token limits - Qwen3 has no limit (uses stop sequences)
-    local max_tokens=40
-    if [[ "$model_name" == *"qwen3"* ]]; then
-        max_tokens=""  # No limit for Qwen3
-    elif [[ "$prompt" =~ (code|program|write|implement|function|script|algorithm|create|explain|describe|what|how|why) ]]; then
-        max_tokens=200
+    # Default: 500 tokens (~375 words) - enough for most responses
+    local max_tokens=500
+    if [[ -n "$requested_tokens" ]]; then
+        max_tokens="$requested_tokens"  # Use requested tokens if provided
+    elif [[ "$family" == "qwen3" ]]; then
+        max_tokens=""  # No limit for Qwen3 (uses stop sequences)
+    elif [[ "$prompt" =~ (code|program|write|implement|function|script|algorithm|example|binary|search|sort) ]]; then
+        max_tokens=800  # More tokens for code/algorithm requests
+    elif [[ "$prompt" =~ (create|explain|describe|what|how|why|list|steps|detailed) ]]; then
+        max_tokens=600  # Extended for explanations
     fi
 
-    # Qwen3-specific parameters (no token limit, uses stop sequences)
-    if [[ "$model_name" == *"qwen3"* ]]; then
-        container_run "$container_model" \
-            -t "$threads" \
-            -c "$ctx_size" \
-            -p "<|im_start|>user
-$prompt<|im_end|>
-<|im_start|>assistant
-" \
-            --temp 0.7 \
-            --top-k 20 \
-            --top-p 0.8 \
-            -r "<|im_end|>" \
-            -r "<|im_start|>" \
-            -r "User:" \
-            -r "Human:" \
+    # Get model-specific parameters
+    local model_args=$(get_model_args "$model_name")
+
+    # Build stop sequence arguments
+    local stop_args=""
+    while IFS= read -r stop_seq; do
+        [[ -n "$stop_seq" ]] && stop_args="$stop_args -r \"$stop_seq\""
+    done <<< "$(get_stop_sequences "$model_name")"
+
+    # Run inference with model-specific settings
+    if [[ "$family" == "qwen3" ]]; then
+        # Qwen3: No token limit, handle thinking blocks
+        eval container_run '"$container_model"' \
+            -t '"$threads"' \
+            -c '"$ctx_size"' \
+            -p '"$formatted_prompt"' \
+            $model_args \
+            $stop_args \
             --log-disable \
-            --no-display-prompt 2>/dev/null | awk 'BEGIN{RS="</think>"} NR==2{gsub(/^[[:space:]]+/,""); print}' | sed 's/<|im_end|>//g'
+            --no-display-prompt 2>/dev/null | \
+            awk 'BEGIN{RS="</think>"} NR==2{gsub(/^[[:space:]]+/,""); print}' | \
+            clean_response
     else
-        # Original parameters for other models (Qwen2, SmolLM, Llama, etc.)
-        container_run "$container_model" \
-            -t "$threads" \
-            -c "$ctx_size" \
-            -p "<|im_start|>user
-$prompt<|im_end|>
-<|im_start|>assistant
-" \
-            -n "$max_tokens" \
-            --temp 0.1 \
-            --repeat-penalty 2.5 \
-            --top-k 10 \
-            --top-p 0.7 \
-            -r "<|im_end|>" \
-            -r "<|im_start|>" \
-            -r "?" \
-            -r "User:" \
-            -r "Human:" \
-            -r "Let me" \
-            -r "Please" \
-            -r "feel free" \
-            -r "Is there" \
-            -r "Is it" \
+        # Other models: Use token limit
+        local token_arg=""
+        [[ -n "$max_tokens" ]] && token_arg="-n $max_tokens"
+
+        eval container_run '"$container_model"' \
+            -t '"$threads"' \
+            -c '"$ctx_size"' \
+            -p '"$formatted_prompt"' \
+            $token_arg \
+            $model_args \
+            $stop_args \
             --log-disable \
-            --no-display-prompt 2>/dev/null | head -c 500 | sed 's/<|im_end|>//g'
+            --no-display-prompt 2>/dev/null | \
+            clean_response
     fi
+}
+
+# Streaming inference - unbuffered output for real-time token streaming
+infer_stream() {
+    local prompt="$1"
+    local requested_tokens="${2:-}"
+    local model_path
+    model_path=$(config_get active_model)
+
+    if [[ -z "$model_path" || ! -f "$model_path" ]]; then
+        echo "Error: No model active"
+        return 1
+    fi
+
+    local threads=$(config_get threads 4)
+    local ctx_size=$(config_get ctx_size 2048)
+    local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
+    local model_name=$(basename "$model_path")
+    local family=$(get_model_family "$model_name")
+
+    # Build prompt
+    local formatted_prompt=$(build_prompt "$model_name" "$prompt")
+
+    # Token limits
+    local max_tokens=500
+    if [[ -n "$requested_tokens" ]]; then
+        max_tokens="$requested_tokens"
+    elif [[ "$family" == "qwen3" ]]; then
+        max_tokens=""
+    elif [[ "$prompt" =~ (code|program|write|implement|function|script) ]]; then
+        max_tokens=800
+    fi
+
+    local model_args=$(get_model_args "$model_name")
+
+    # Stop sequences
+    local stop_args=""
+    while IFS= read -r stop_seq; do
+        [[ -n "$stop_seq" ]] && stop_args="$stop_args -r \"$stop_seq\""
+    done <<< "$(get_stop_sequences "$model_name")"
+
+    # Token limit arg
+    local token_arg=""
+    [[ -n "$max_tokens" ]] && token_arg="-n $max_tokens"
+
+    # Run inference - llamafile outputs tokens as they're generated
+    # The Python PTY wrapper handles unbuffering
+    proot-distro login "$CONTAINER_NAME" \
+        --bind "$POCKETAI_ROOT/data:/opt/pocketai/data" \
+        --bind "$POCKETAI_ROOT/models:/opt/pocketai/models" \
+        -- "$CONTAINER_BIN" -m "$container_model" \
+        -t "$threads" \
+        -c "$ctx_size" \
+        -p "$formatted_prompt" \
+        $token_arg \
+        $model_args \
+        $stop_args \
+        --log-disable \
+        --no-display-prompt 2>/dev/null
 }
 
 # Minimal cleanup - just stop at turn markers
@@ -434,23 +496,291 @@ cleanup_latex() {
         -e 's/\\cdot/·/g'
 }
 
+# =============================================================================
+# Model-Specific Prompt Templates
+# =============================================================================
+
+# Detect model family from filename
+get_model_family() {
+    local model_name="$1"
+    model_name=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
+
+    if [[ "$model_name" == *"qwen3"* ]]; then
+        echo "qwen3"
+    elif [[ "$model_name" == *"qwen"* ]]; then
+        echo "qwen"  # Qwen, Qwen2, Qwen2.5
+    elif [[ "$model_name" == *"smollm"* ]]; then
+        echo "smollm"
+    elif [[ "$model_name" == *"llama-3"* || "$model_name" == *"llama3"* ]]; then
+        echo "llama3"
+    elif [[ "$model_name" == *"tinyllama"* ]]; then
+        echo "tinyllama"
+    elif [[ "$model_name" == *"gemma"* ]]; then
+        echo "gemma"
+    elif [[ "$model_name" == *"phi-2"* || "$model_name" == *"phi2"* ]]; then
+        echo "phi2"
+    elif [[ "$model_name" == *"stablelm"* || "$model_name" == *"zephyr"* ]]; then
+        echo "zephyr"
+    else
+        echo "chatml"  # Default fallback
+    fi
+}
+
+# Build prompt with correct template for model
+build_prompt() {
+    local model_name="$1"
+    local user_message="$2"
+    local history="${3:-}"
+    local family=$(get_model_family "$model_name")
+
+    case "$family" in
+        qwen3|qwen|smollm)
+            # ChatML format (Qwen, Qwen2, Qwen3, SmolLM2)
+            echo "${history}<|im_start|>user
+${user_message}<|im_end|>
+<|im_start|>assistant
+"
+            ;;
+        llama3)
+            # Llama 3.x format
+            if [[ -z "$history" ]]; then
+                echo "<|begin_of_text|><|start_header_id|>user<|end_header_id|>
+
+${user_message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+"
+            else
+                echo "${history}<|start_header_id|>user<|end_header_id|>
+
+${user_message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+"
+            fi
+            ;;
+        tinyllama)
+            # TinyLlama format
+            echo "${history}<|user|>
+${user_message}</s>
+<|assistant|>
+"
+            ;;
+        gemma)
+            # Gemma format (no system prompt support)
+            echo "${history}<start_of_turn>user
+${user_message}<end_of_turn>
+<start_of_turn>model
+"
+            ;;
+        phi2)
+            # Phi-2 Instruct format (not instruction-tuned, simple format)
+            echo "Instruct: ${user_message}
+Output: "
+            ;;
+        zephyr)
+            # Zephyr/StableLM format
+            echo "${history}<|user|>
+${user_message}<|endoftext|>
+<|assistant|>
+"
+            ;;
+        *)
+            # Default to ChatML
+            echo "${history}<|im_start|>user
+${user_message}<|im_end|>
+<|im_start|>assistant
+"
+            ;;
+    esac
+}
+
+# Build history entry for multi-turn chat
+build_history_entry() {
+    local model_name="$1"
+    local user_message="$2"
+    local assistant_response="$3"
+    local family=$(get_model_family "$model_name")
+
+    case "$family" in
+        qwen3|qwen|smollm)
+            echo "<|im_start|>user
+${user_message}<|im_end|>
+<|im_start|>assistant
+${assistant_response}<|im_end|>
+"
+            ;;
+        llama3)
+            echo "<|start_header_id|>user<|end_header_id|>
+
+${user_message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+${assistant_response}<|eot_id|>
+"
+            ;;
+        tinyllama)
+            echo "<|user|>
+${user_message}</s>
+<|assistant|>
+${assistant_response}</s>
+"
+            ;;
+        gemma)
+            echo "<start_of_turn>user
+${user_message}<end_of_turn>
+<start_of_turn>model
+${assistant_response}<end_of_turn>
+"
+            ;;
+        phi2)
+            # Phi-2 doesn't support multi-turn well
+            echo ""
+            ;;
+        zephyr)
+            echo "<|user|>
+${user_message}<|endoftext|>
+<|assistant|>
+${assistant_response}<|endoftext|>
+"
+            ;;
+        *)
+            echo "<|im_start|>user
+${user_message}<|im_end|>
+<|im_start|>assistant
+${assistant_response}<|im_end|>
+"
+            ;;
+    esac
+}
+
+# Get llamafile arguments for model-specific stop sequences
+get_model_args() {
+    local model_name="$1"
+    local family=$(get_model_family "$model_name")
+
+    case "$family" in
+        qwen3)
+            # Qwen3: No token limit, uses stop sequences, higher temp
+            echo "--temp 0.7 --top-k 20 --top-p 0.8"
+            ;;
+        qwen|smollm)
+            # ChatML models: moderate settings
+            echo "--temp 0.3 --top-k 40 --top-p 0.9 --repeat-penalty 1.1"
+            ;;
+        llama3)
+            # Llama 3: works well with moderate temp
+            echo "--temp 0.6 --top-k 40 --top-p 0.9 --repeat-penalty 1.1"
+            ;;
+        tinyllama)
+            # TinyLlama: lower temp for consistency
+            echo "--temp 0.4 --top-k 40 --top-p 0.9 --repeat-penalty 1.1"
+            ;;
+        gemma)
+            # Gemma: moderate settings
+            echo "--temp 0.5 --top-k 40 --top-p 0.9 --repeat-penalty 1.1"
+            ;;
+        phi2)
+            # Phi-2: lower temp, not instruction-tuned
+            echo "--temp 0.2 --top-k 50 --top-p 0.95 --repeat-penalty 1.2"
+            ;;
+        zephyr)
+            # Zephyr/StableLM
+            echo "--temp 0.5 --top-k 40 --top-p 0.9 --repeat-penalty 1.1"
+            ;;
+        *)
+            echo "--temp 0.3 --top-k 40 --top-p 0.9 --repeat-penalty 1.1"
+            ;;
+    esac
+}
+
+# Get stop sequences for model
+get_stop_sequences() {
+    local model_name="$1"
+    local family=$(get_model_family "$model_name")
+
+    case "$family" in
+        qwen3|qwen|smollm)
+            echo '<|im_end|>
+<|im_start|>
+User:
+Human:'
+            ;;
+        llama3)
+            echo '<|eot_id|>
+<|start_header_id|>
+User:
+Human:'
+            ;;
+        tinyllama)
+            echo '</s>
+<|user|>
+User:
+Human:'
+            ;;
+        gemma)
+            echo '<end_of_turn>
+<start_of_turn>
+User:
+Human:'
+            ;;
+        phi2)
+            echo 'Instruct:
+Output:
+User:
+Human:'
+            ;;
+        zephyr)
+            echo '<|endoftext|>
+<|user|>
+User:
+Human:'
+            ;;
+        *)
+            echo '<|im_end|>
+<|im_start|>
+User:
+Human:'
+            ;;
+    esac
+}
+
+# Clean response - remove all known special tokens
+clean_response() {
+    sed -e 's/<|im_end|>//g' \
+        -e 's/<|im_start|>//g' \
+        -e 's/<|eot_id|>//g' \
+        -e 's/<|start_header_id|>//g' \
+        -e 's/<|end_header_id|>//g' \
+        -e 's/<|begin_of_text|>//g' \
+        -e 's/<end_of_turn>//g' \
+        -e 's/<start_of_turn>//g' \
+        -e 's/<|endoftext|>//g' \
+        -e 's/<|user|>//g' \
+        -e 's/<|assistant|>//g' \
+        -e 's/<\/s>//g' \
+        -e 's/^[[:space:]]*//' \
+        -e 's/[[:space:]]*$//'
+}
+
 chat_interactive() {
     local model_path
     model_path=$(config_get active_model)
 
     if [[ -z "$model_path" || ! -f "$model_path" ]]; then
-        log_error "No model active. Run: pai install tinyllama"
+        log_error "No model active. Run: pai install qwen3"
         return 1
     fi
 
-    log_info "Chat with $(basename "$model_path")"
+    local model_name=$(basename "$model_path")
+    local family=$(get_model_family "$model_name")
+
+    log_info "Chat with $model_name"
+    log_info "Model family: $family"
     log_info "Commands: 'exit' to quit, '/clear' to reset context"
     log_info "Context: Remembers last 4 exchanges"
     echo ""
 
     local threads=$(config_get threads 4)
     local ctx_size=$(config_get ctx_size 2048)
-    local container_model="$CONTAINER_MODELS/$(basename "$model_path")"
+    local container_model="$CONTAINER_MODELS/$model_name"
 
     # Use temp file for history (Termux-compatible path)
     local tmp_dir="${TMPDIR:-$HOME/.cache/pocketai}"
@@ -458,6 +788,15 @@ chat_interactive() {
     local history_file="$tmp_dir/pocketai_history_$$"
     echo -n "" > "$history_file"
     trap "rm -f '$history_file'" EXIT
+
+    # Get model-specific parameters
+    local model_args=$(get_model_args "$model_name")
+
+    # Build stop sequence arguments
+    local stop_args=""
+    while IFS= read -r stop_seq; do
+        [[ -n "$stop_seq" ]] && stop_args="$stop_args -r \"$stop_seq\""
+    done <<< "$(get_stop_sequences "$model_name")"
 
     while true; do
         echo -ne "${CYAN}You>${RESET} "
@@ -474,91 +813,75 @@ chat_interactive() {
             continue
         fi
 
-        # Read history and build context
+        # Read history
         local history=""
         if [[ -s "$history_file" ]]; then
             history=$(cat "$history_file")
         fi
 
-        # Detect model type
-        local model_name=$(basename "$model_path" | tr '[:upper:]' '[:lower:]')
-
         # Token limits - Qwen3 has no limit (uses stop sequences)
-        local max_tokens=40
-        if [[ "$model_name" == *"qwen3"* ]]; then
-            max_tokens=""  # No limit for Qwen3
-        elif [[ "$user_input" =~ (code|program|write|implement|function|script|algorithm|create|explain|describe|what|how|why) ]]; then
-            max_tokens=200
+        # Default: 500 tokens (~375 words) - enough for most responses
+        local max_tokens=500
+        if [[ "$family" == "qwen3" ]]; then
+            max_tokens=""  # No limit for Qwen3 (uses stop sequences)
+        elif [[ "$user_input" =~ (code|program|write|implement|function|script|algorithm|example|binary|search|sort) ]]; then
+            max_tokens=800  # More tokens for code/algorithm requests
+        elif [[ "$user_input" =~ (create|explain|describe|what|how|why|list|steps|detailed) ]]; then
+            max_tokens=600  # Extended for explanations
         fi
 
         echo -ne "${GREEN}AI>${RESET} "
 
+        # Build model-specific prompt with history
+        local formatted_prompt=$(build_prompt "$model_name" "$user_input" "$history")
+
         # Stream response
         local response_file="$tmp_dir/response_$$"
 
-        # Qwen3-specific chat (no token limit, uses stop sequences)
-        if [[ "$model_name" == *"qwen3"* ]]; then
-            local context="${history}<|im_start|>user
-$user_input<|im_end|>
-<|im_start|>assistant
-"
-            container_run "$container_model" \
-                -t "$threads" \
-                -c "$ctx_size" \
-                -p "$context" \
-                --temp 0.7 \
-                --top-k 20 \
-                --top-p 0.8 \
-                -r "<|im_end|>" \
-                -r "<|im_start|>" \
-                -r "User:" \
-                -r "Human:" \
+        if [[ "$family" == "qwen3" ]]; then
+            # Qwen3: No token limit, handle thinking blocks
+            eval container_run '"$container_model"' \
+                -t '"$threads"' \
+                -c '"$ctx_size"' \
+                -p '"$formatted_prompt"' \
+                $model_args \
+                $stop_args \
                 --log-disable \
                 --no-display-prompt 2>/dev/null > "$response_file"
+
             # Strip thinking block and display
-            sed -n '/<\/think>/,$ p' "$response_file" | sed '1d; s/<|im_end|>//g'
-            # Update response file with clean content
-            local clean_response=$(sed -n '/<\/think>/,$ p' "$response_file" | sed '1d; s/<|im_end|>//g')
-            echo "$clean_response" > "$response_file"
+            if grep -q '</think>' "$response_file"; then
+                sed -n '/<\/think>/,$ p' "$response_file" | sed '1d' | clean_response | tee "${response_file}.clean"
+                mv "${response_file}.clean" "$response_file"
+            else
+                cat "$response_file" | clean_response | tee "${response_file}.clean"
+                mv "${response_file}.clean" "$response_file"
+            fi
         else
-            # Original parameters for other models
-            local context="${history}<|im_start|>user
-$user_input<|im_end|>
-<|im_start|>assistant
-"
-            container_run "$container_model" \
-                -t "$threads" \
-                -c "$ctx_size" \
-                -p "$context" \
-                -n "$max_tokens" \
-                --temp 0.1 \
-                --repeat-penalty 2.5 \
-                --top-k 10 \
-                --top-p 0.7 \
-                -r "<|im_end|>" \
-                -r "<|im_start|>" \
-                -r "?" \
-                -r "User:" \
-                -r "Human:" \
-                -r "Let me" \
-                -r "Please" \
-                -r "feel free" \
-                -r "Is there" \
-                -r "Is it" \
+            # Other models: Use token limit
+            local token_arg=""
+            [[ -n "$max_tokens" ]] && token_arg="-n $max_tokens"
+
+            eval container_run '"$container_model"' \
+                -t '"$threads"' \
+                -c '"$ctx_size"' \
+                -p '"$formatted_prompt"' \
+                $token_arg \
+                $model_args \
+                $stop_args \
                 --log-disable \
-                --no-display-prompt 2>/dev/null | head -c 500 | sed 's/<|im_end|>//g' | tee "$response_file"
+                --no-display-prompt 2>/dev/null | \
+                clean_response | \
+                tee "$response_file"
         fi
 
         local response=$(cat "$response_file")
         rm -f "$response_file"
         echo ""
 
-        # Append to history file (ChatML format)
-        echo "<|im_start|>user
-$user_input<|im_end|>
-<|im_start|>assistant
-$response<|im_end|>
-" >> "$history_file"
+        # Append to history file using model-specific format
+        local history_entry=$(build_history_entry "$model_name" "$user_input" "$response")
+        echo "$history_entry" >> "$history_file"
 
         # Trim history to last 4 exchanges (keep file under ~2000 bytes)
         if [[ $(wc -c < "$history_file") -gt 2000 ]]; then
@@ -588,141 +911,382 @@ api_start() {
     log_step "Starting PocketAI REST API"
     log_info "Port: $API_PORT"
 
-    # Create Python API server
     local api_script="$DATA_DIR/api_server.py"
-    cat > "$api_script" << PYEOF
+
+    # Use existing api_server.py if present, otherwise generate default
+    if [ -f "$api_script" ]; then
+        log_info "Using existing api_server.py"
+    else
+        log_info "Generating api_server.py"
+        # Create Python API server
+        cat > "$api_script" << PYEOF
 #!/usr/bin/env python3
 import http.server
 import socketserver
 import json
 import subprocess
 import os
-import re
+import sys
+import time
+import signal
+import traceback
+import threading
 from urllib.parse import urlparse, parse_qs
+from datetime import datetime
 
 PORT = int(os.environ.get('API_PORT', $API_PORT))
 POCKETAI_ROOT = os.environ.get('POCKETAI_ROOT', '$POCKETAI_ROOT')
 
-def run_cmd(cmd):
-    """Run shell command and return output"""
+# =============================================================================
+# Logging
+# =============================================================================
+def log(level, msg):
+    """Thread-safe logging with timestamp"""
+    ts = datetime.now().strftime('%H:%M:%S')
+    print(f"[{ts}] [{level}] {msg}", flush=True)
+
+def log_info(msg): log("INFO", msg)
+def log_warn(msg): log("WARN", msg)
+def log_error(msg): log("ERROR", msg)
+def log_debug(msg): log("DEBUG", msg)
+
+# =============================================================================
+# Request tracking
+# =============================================================================
+_request_count = 0
+_active_streams = 0
+_lock = threading.Lock()
+
+def get_request_id():
+    global _request_count
+    with _lock:
+        _request_count += 1
+        return _request_count
+
+# =============================================================================
+# Cache for expensive operations
+# =============================================================================
+_status_cache = {
+    'model': None,
+    'version': None,
+    'last_update': 0,
+    'cache_ttl': 30
+}
+
+def get_cached_status():
+    """Get cached status or refresh if stale"""
+    try:
+        now = time.time()
+        if now - _status_cache['last_update'] > _status_cache['cache_ttl']:
+            model, _ = run_cmd('config_get active_model', timeout=10)
+            version, _ = run_cmd('echo \$VERSION', timeout=5)
+            _status_cache['model'] = os.path.basename(model) if model else ''
+            _status_cache['version'] = version
+            _status_cache['last_update'] = now
+        return _status_cache['model'], _status_cache['version']
+    except Exception as e:
+        log_error(f"get_cached_status failed: {e}")
+        return _status_cache.get('model', ''), _status_cache.get('version', '')
+
+# =============================================================================
+# Command execution
+# =============================================================================
+def run_cmd(cmd, timeout=60):
+    """Run shell command with timeout and error handling"""
     try:
         result = subprocess.run(
             f'source {POCKETAI_ROOT}/core/engine.sh && {cmd}',
             shell=True, capture_output=True, text=True,
-            executable='/data/data/com.termux/files/usr/bin/bash'
+            executable='/data/data/com.termux/files/usr/bin/bash',
+            timeout=timeout
         )
         return result.stdout.strip(), result.returncode == 0
+    except subprocess.TimeoutExpired:
+        log_error(f"Command timed out after {timeout}s: {cmd[:50]}...")
+        return f"Command timed out after {timeout}s", False
     except Exception as e:
+        log_error(f"run_cmd failed: {e}")
         return str(e), False
 
+def run_cmd_stream(cmd, timeout=300):
+    """Run shell command and yield output in real-time using PTY"""
+    import pty
+    import select
+
+    global _active_streams
+    master_fd = None
+    process = None
+    start_time = time.time()
+
+    try:
+        with _lock:
+            _active_streams += 1
+        log_info(f"Stream started (active: {_active_streams})")
+
+        master_fd, slave_fd = pty.openpty()
+        process = subprocess.Popen(
+            f'source {POCKETAI_ROOT}/core/engine.sh && {cmd}',
+            shell=True,
+            stdout=slave_fd,
+            stderr=subprocess.PIPE,
+            executable='/data/data/com.termux/files/usr/bin/bash'
+        )
+        os.close(slave_fd)
+
+        token_count = 0
+        while True:
+            # Check timeout
+            if time.time() - start_time > timeout:
+                log_warn(f"Stream timeout after {timeout}s")
+                break
+
+            ready, _, _ = select.select([master_fd], [], [], 0.1)
+            if ready:
+                try:
+                    data = os.read(master_fd, 1)
+                    if data:
+                        token_count += 1
+                        yield data.decode('utf-8', errors='replace')
+                    else:
+                        break
+                except OSError as e:
+                    log_debug(f"OSError in stream read: {e}")
+                    break
+            elif process.poll() is not None:
+                # Process finished, read remaining data
+                try:
+                    while True:
+                        ready, _, _ = select.select([master_fd], [], [], 0)
+                        if ready:
+                            data = os.read(master_fd, 1024)
+                            if data:
+                                yield data.decode('utf-8', errors='replace')
+                            else:
+                                break
+                        else:
+                            break
+                except OSError:
+                    pass
+                break
+
+        duration = time.time() - start_time
+        log_info(f"Stream complete: {token_count} tokens in {duration:.1f}s")
+
+    except Exception as e:
+        log_error(f"Stream error: {e}\n{traceback.format_exc()}")
+        yield f"[Error: {str(e)}]"
+    finally:
+        # Cleanup
+        with _lock:
+            _active_streams -= 1
+        if master_fd is not None:
+            try:
+                os.close(master_fd)
+            except:
+                pass
+        if process is not None:
+            try:
+                process.terminate()
+                process.wait(timeout=2)
+            except:
+                try:
+                    process.kill()
+                except:
+                    pass
+
 class APIHandler(http.server.BaseHTTPRequestHandler):
+    # Suppress default logging
+    def log_message(self, format, *args):
+        pass
+
     def send_json(self, data, status=200):
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
+        try:
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode())
+        except (BrokenPipeError, ConnectionResetError) as e:
+            log_debug(f"Client disconnected during JSON response: {e}")
+        except Exception as e:
+            log_error(f"send_json error: {e}")
+
+    def send_error_json(self, message, status=500):
+        """Send error response as JSON"""
+        log_error(f"HTTP {status}: {message}")
+        self.send_json({'error': message, 'status': status}, status)
+
+    def send_sse_stream(self, generator):
+        """Send Server-Sent Events stream with robust error handling"""
+        req_id = get_request_id()
+        log_info(f"[REQ-{req_id}] SSE stream started")
+        buffer = ""
+        token_count = 0
+
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('X-Request-ID', str(req_id))
+            self.end_headers()
+
+            for char in generator:
+                buffer += char
+                token_count += 1
+                try:
+                    self.wfile.write(f"data: {json.dumps({'token': char})}\n\n".encode())
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    log_warn(f"[REQ-{req_id}] Client disconnected during stream")
+                    return
+
+            # Send completion event
+            self.wfile.write(f"data: {json.dumps({'done': True, 'full_response': buffer})}\n\n".encode())
+            self.wfile.flush()
+            log_info(f"[REQ-{req_id}] SSE complete: {token_count} tokens")
+
+        except (BrokenPipeError, ConnectionResetError) as e:
+            log_warn(f"[REQ-{req_id}] Client disconnected: {e}")
+        except Exception as e:
+            log_error(f"[REQ-{req_id}] SSE error: {e}\n{traceback.format_exc()}")
+            try:
+                self.wfile.write(f"data: {json.dumps({'error': str(e)})}\n\n".encode())
+                self.wfile.flush()
+            except:
+                pass
 
     def do_OPTIONS(self):
         self.send_json({})
 
     def do_GET(self):
+        req_id = get_request_id()
         path = urlparse(self.path).path
-
-        if path == '/api/health':
-            self.send_json({'healthy': True})
-
-        elif path == '/api/status':
-            model, _ = run_cmd('config_get active_model')
-            version, _ = run_cmd('echo \$VERSION')
-            model_name = os.path.basename(model) if model else ''
-            self.send_json({'status': 'ok', 'version': version, 'model': model_name})
-
-        elif path == '/api/models':
-            out, _ = run_cmd('for n in "\${!MODEL_CATALOG[@]}"; do echo "\$n|\${MODEL_CATALOG[\$n]}"; done')
-            models = []
-            for line in out.split('\n'):
-                if '|' in line:
-                    parts = line.split('|')
-                    name = parts[0]
-                    info = parts[1].split('|') if len(parts) > 1 else ['', '', '', '']
-                    models.append({
-                        'name': name,
-                        'description': info[0] if len(info) > 0 else '',
-                        'size': info[1] if len(info) > 1 else '',
-                        'ram': info[2] if len(info) > 2 else ''
-                    })
-            self.send_json({'models': models})
-
-        elif path == '/api/models/installed':
-            out, _ = run_cmd('for f in "\$MODELS_DIR"/*.gguf; do [ -f "\$f" ] && echo "\$f"; done')
-            active, _ = run_cmd('config_get active_model')
-            models = []
-            for f in out.split('\n'):
-                if f and f.endswith('.gguf'):
-                    size_out, _ = run_cmd(f'du -h "{f}" | cut -f1')
-                    models.append({
-                        'name': os.path.basename(f),
-                        'size': size_out,
-                        'active': f == active
-                    })
-            self.send_json({'models': models})
-
-        elif path == '/api/config':
-            out, _ = run_cmd('cat "\$CONFIG_FILE" 2>/dev/null || echo ""')
-            config = {}
-            for line in out.split('\n'):
-                if '=' in line and not line.startswith('#'):
-                    k, v = line.split('=', 1)
-                    config[k] = v
-            self.send_json(config)
-
-        else:
-            self.send_json({'error': 'Not found'}, 404)
-
-    def do_POST(self):
-        path = urlparse(self.path).path
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length).decode() if content_length > 0 else '{}'
 
         try:
-            data = json.loads(body)
-        except:
-            data = {}
+            if path == '/api/health':
+                self.send_json({'healthy': True, 'active_streams': _active_streams})
 
-        if path == '/api/models/install':
-            model = data.get('model', '')
-            out, ok = run_cmd(f'model_install "{model}"')
-            self.send_json({'success': ok, 'message': out or f'Model {model} installed'})
+            elif path == '/api/status':
+                model_name, version = get_cached_status()
+                self.send_json({'status': 'ok', 'version': version, 'model': model_name})
 
-        elif path == '/api/models/remove':
-            model = data.get('model', '')
-            out, ok = run_cmd(f'model_remove "{model}"')
-            self.send_json({'success': ok, 'message': out or f'Model {model} removed'})
+            elif path == '/api/models':
+                out, _ = run_cmd('for n in "\${!MODEL_CATALOG[@]}"; do echo "\$n|\${MODEL_CATALOG[\$n]}"; done')
+                models = []
+                for line in out.split('\n'):
+                    if '|' in line:
+                        parts = line.split('|')
+                        name = parts[0]
+                        info = parts[1].split('|') if len(parts) > 1 else ['', '', '', '']
+                        models.append({
+                            'name': name,
+                            'description': info[0] if len(info) > 0 else '',
+                            'size': info[1] if len(info) > 1 else '',
+                            'ram': info[2] if len(info) > 2 else ''
+                        })
+                self.send_json({'models': models})
 
-        elif path == '/api/models/use':
-            model = data.get('model', '')
-            out, ok = run_cmd(f'model_activate "{model}"')
-            self.send_json({'success': ok, 'message': out or f'Model {model} activated'})
+            elif path == '/api/models/installed':
+                out, _ = run_cmd('for f in "\$MODELS_DIR"/*.gguf; do [ -f "\$f" ] && echo "\$f"; done')
+                active, _ = run_cmd('config_get active_model')
+                models = []
+                for f in out.split('\n'):
+                    if f and f.endswith('.gguf'):
+                        size_out, _ = run_cmd(f'du -h "{f}" | cut -f1')
+                        models.append({
+                            'name': os.path.basename(f),
+                            'size': size_out,
+                            'active': f == active
+                        })
+                self.send_json({'models': models})
 
-        elif path == '/api/chat':
-            message = data.get('message', '')
-            out, ok = run_cmd(f'infer "{message}"')
-            self.send_json({'response': out})
+            elif path == '/api/config':
+                out, _ = run_cmd('cat "\$CONFIG_FILE" 2>/dev/null || echo ""')
+                config = {}
+                for line in out.split('\n'):
+                    if '=' in line and not line.startswith('#'):
+                        k, v = line.split('=', 1)
+                        config[k] = v
+                self.send_json(config)
 
-        elif path == '/api/config':
-            key = data.get('key', '')
-            value = data.get('value', '')
-            run_cmd(f'config_set "{key}" "{value}"')
-            self.send_json({'success': True})
+            else:
+                self.send_json({'error': 'Not found'}, 404)
 
-        else:
-            self.send_json({'error': 'Not found'}, 404)
+        except Exception as e:
+            log_error(f"[REQ-{req_id}] GET {path} error: {e}\n{traceback.format_exc()}")
+            self.send_error_json(str(e), 500)
 
-    def log_message(self, format, *args):
-        pass  # Suppress logging
+    def do_POST(self):
+        req_id = get_request_id()
+        path = urlparse(self.path).path
+
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode() if content_length > 0 else '{}'
+
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError as e:
+                log_warn(f"[REQ-{req_id}] Invalid JSON: {e}")
+                data = {}
+
+            if path == '/api/models/install':
+                model = data.get('model', '')
+                log_info(f"[REQ-{req_id}] Installing model: {model}")
+                out, ok = run_cmd(f'model_install "{model}"', timeout=600)
+                self.send_json({'success': ok, 'message': out or f'Model {model} installed'})
+
+            elif path == '/api/models/remove':
+                model = data.get('model', '')
+                log_info(f"[REQ-{req_id}] Removing model: {model}")
+                out, ok = run_cmd(f'model_remove "{model}"')
+                self.send_json({'success': ok, 'message': out or f'Model {model} removed'})
+
+            elif path == '/api/models/use':
+                model = data.get('model', '')
+                log_info(f"[REQ-{req_id}] Activating model: {model}")
+                out, ok = run_cmd(f'model_activate "{model}"')
+                # Invalidate cache when model changes
+                _status_cache['last_update'] = 0
+                self.send_json({'success': ok, 'message': out or f'Model {model} activated'})
+
+            elif path == '/api/chat':
+                message = data.get('message', '')
+                max_tokens = data.get('max_tokens', '')
+                log_info(f"[REQ-{req_id}] Chat request (blocking): {len(message)} chars")
+                # Escape message for shell
+                message = message.replace('"', '\\"').replace('\$', '\\\$')
+                if max_tokens:
+                    out, ok = run_cmd(f'infer "{message}" "{max_tokens}"', timeout=300)
+                else:
+                    out, ok = run_cmd(f'infer "{message}"', timeout=300)
+                log_info(f"[REQ-{req_id}] Chat complete: {len(out)} chars")
+                self.send_json({'response': out})
+
+            elif path == '/api/chat/stream':
+                message = data.get('message', '')
+                log_info(f"[REQ-{req_id}] Chat request (streaming): {len(message)} chars")
+                # Escape message for shell
+                message = message.replace('"', '\\"').replace('\$', '\\\$').replace('\`', '\\\`')
+                self.send_sse_stream(run_cmd_stream(f'infer_stream "{message}"'))
+
+            elif path == '/api/config':
+                key = data.get('key', '')
+                value = data.get('value', '')
+                log_info(f"[REQ-{req_id}] Config set: {key}={value}")
+                run_cmd(f'config_set "{key}" "{value}"')
+                self.send_json({'success': True})
+
+            else:
+                self.send_json({'error': 'Not found'}, 404)
+
+        except Exception as e:
+            log_error(f"[REQ-{req_id}] POST {path} error: {e}\n{traceback.format_exc()}")
+            self.send_error_json(str(e), 500)
 
 class CombinedHandler(APIHandler):
     """Serve both API and static web files"""
@@ -741,28 +1305,58 @@ class CombinedHandler(APIHandler):
         file_path = os.path.join(web_dir, path.lstrip('/'))
 
         if os.path.isfile(file_path):
-            self.send_response(200)
-            if file_path.endswith('.html'):
-                self.send_header('Content-Type', 'text/html')
-            elif file_path.endswith('.js'):
-                self.send_header('Content-Type', 'application/javascript')
-            elif file_path.endswith('.css'):
-                self.send_header('Content-Type', 'text/css')
-            self.end_headers()
-            with open(file_path, 'rb') as f:
-                self.wfile.write(f.read())
+            try:
+                self.send_response(200)
+                if file_path.endswith('.html'):
+                    self.send_header('Content-Type', 'text/html')
+                elif file_path.endswith('.js'):
+                    self.send_header('Content-Type', 'application/javascript')
+                elif file_path.endswith('.css'):
+                    self.send_header('Content-Type', 'text/css')
+                self.end_headers()
+                with open(file_path, 'rb') as f:
+                    self.wfile.write(f.read())
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         else:
             self.send_json({'error': 'Not found'}, 404)
 
+class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    """Handle each request in a new thread for better concurrency"""
+    daemon_threads = True
+    allow_reuse_address = True
+
+def shutdown_handler(signum, frame):
+    """Graceful shutdown on SIGINT/SIGTERM"""
+    log_info(f"Received signal {signum}, shutting down...")
+    sys.exit(0)
+
 if __name__ == '__main__':
+    # Register signal handlers
+    signal.signal(signal.SIGINT, shutdown_handler)
+    signal.signal(signal.SIGTERM, shutdown_handler)
+
     Handler = CombinedHandler if os.environ.get('SERVE_WEB') else APIHandler
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(('', PORT), Handler) as httpd:
-        mode = 'API + Web' if os.environ.get('SERVE_WEB') else 'API only'
-        print(f'Server running on port {PORT} ({mode})')
-        httpd.serve_forever()
+    mode = 'API + Web' if os.environ.get('SERVE_WEB') else 'API only'
+
+    log_info("=" * 50)
+    log_info(f"PocketAI API Server v2.0")
+    log_info(f"Port: {PORT} | Mode: {mode}")
+    log_info("=" * 50)
+
+    try:
+        with ThreadedTCPServer(('', PORT), Handler) as httpd:
+            log_info(f"Server ready - listening on port {PORT}")
+            httpd.serve_forever()
+    except OSError as e:
+        log_error(f"Failed to start server: {e}")
+        sys.exit(1)
+    except Exception as e:
+        log_error(f"Server error: {e}\n{traceback.format_exc()}")
+        sys.exit(1)
 PYEOF
-    chmod +x "$api_script"
+        chmod +x "$api_script"
+    fi
 
     # Start Python API server
     log_info "Starting API server..."
@@ -782,6 +1376,7 @@ PYEOF
         echo "  POST /api/models/remove   - Remove model {\"model\":\"name\"}"
         echo "  POST /api/models/use      - Activate model {\"model\":\"name\"}"
         echo "  POST /api/chat            - Send message {\"message\":\"text\"}"
+        echo "  POST /api/chat/stream     - Stream response (SSE)"
         echo "  GET  /api/config          - Get config"
         echo "  POST /api/config          - Set config {\"key\":\"k\",\"value\":\"v\"}"
         echo ""
@@ -959,7 +1554,8 @@ export -f config_get config_set
 export -f container_exists container_create container_exec container_run
 export -f engine_installed engine_install engine_version
 export -f model_list_available model_list_installed model_install model_activate model_remove
-export -f infer chat_interactive system_info
+export -f get_model_family build_prompt build_history_entry get_model_args get_stop_sequences clean_response
+export -f infer infer_stream chat_interactive system_info
 export -f server_start server_stop server_status server_info
 export -f api_start api_stop
 export -f log_info log_success log_warn log_error log_step

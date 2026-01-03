@@ -9,8 +9,11 @@ Complete documentation for all `pai` commands.
 - [Chat Commands](#chat-commands)
 - [Server Commands](#server-commands)
 - [API Commands](#api-commands)
+  - [Streaming Chat Endpoint](#streaming-chat-endpoint)
 - [Configuration Commands](#configuration-commands)
 - [Info Commands](#info-commands)
+- [Examples](#examples)
+  - [Streaming in Your App](#streaming-in-your-app)
 
 ---
 
@@ -34,6 +37,46 @@ pai init
 - First time setup
 - After a fresh install
 - To repair broken installation
+
+---
+
+### `pai update`
+
+Update PocketAI to the latest version from GitHub.
+
+```bash
+pai update
+```
+
+**What it does:**
+- Fetches latest changes from GitHub
+- Shows new commits before updating
+- Auto-stashes local changes if any
+- Pulls updates with fast-forward merge
+- Restores stashed changes after update
+
+**Features:**
+- Safe update with automatic backup of local changes
+- Preview of what's new before applying
+- Automatic conflict detection
+- Version display after update
+
+**Example output:**
+```
+Updating PocketAI
+▸ Fetching latest changes...
+▸ Changes available:
+abc1234 Fix prompt templates
+def5678 Add update command
+
+▸ Pulling updates...
+✓ Update successful!
+
+Update Complete!
+PocketAI v2.0.0
+```
+
+**Alias:** `pai upgrade`
 
 ---
 
@@ -367,7 +410,8 @@ pai api status
 | POST | `/api/models/install` | `{"model": "name"}` | Install model |
 | POST | `/api/models/remove` | `{"model": "name"}` | Remove model |
 | POST | `/api/models/use` | `{"model": "name"}` | Switch model |
-| POST | `/api/chat` | `{"message": "text"}` | Send message |
+| POST | `/api/chat` | `{"message": "text"}` | Send message (blocking) |
+| POST | `/api/chat/stream` | `{"message": "text"}` | Send message (streaming) |
 | GET | `/api/config` | - | Get config |
 | POST | `/api/config` | `{"key": "k", "value": "v"}` | Set config |
 
@@ -398,6 +442,125 @@ curl -X POST http://localhost:8081/api/models/use \
   -H "Content-Type: application/json" \
   -d '{"model": "llama3.2"}'
 ```
+
+---
+
+### Streaming Chat Endpoint
+
+The `/api/chat/stream` endpoint provides real-time token streaming via Server-Sent Events (SSE).
+
+**Endpoint:** `POST /api/chat/stream`
+
+**Request:**
+```json
+{
+  "message": "Your question here",
+  "max_tokens": 500
+}
+```
+
+**Parameters:**
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `message` | Yes | - | The user's message/question |
+| `max_tokens` | No | 500 | Maximum tokens to generate |
+
+**Token Limits (when `max_tokens` not specified):**
+| Condition | Limit |
+|-----------|-------|
+| Default | 500 tokens (~375 words) |
+| Code/algorithm in prompt | 800 tokens |
+| Explain/describe in prompt | 600 tokens |
+| Qwen3 model | No limit (uses stop sequences) |
+
+> **Tip:** Override with `max_tokens` if you need more/less.
+
+**Response Format (SSE):**
+```
+data: {"token": "H"}
+data: {"token": "e"}
+data: {"token": "l"}
+data: {"token": "l"}
+data: {"token": "o"}
+...
+data: {"done": true, "full_response": "Hello..."}
+```
+
+**Streaming Example:**
+```bash
+# Stream response in real-time
+curl -N -X POST http://localhost:8081/api/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello!"}'
+```
+
+**Comparison: Blocking vs Streaming**
+
+| Feature | `/api/chat` | `/api/chat/stream` |
+|---------|-------------|-------------------|
+| Response type | JSON | SSE stream |
+| First output | After full generation | Immediate tokens |
+| User experience | Wait → See all | See tokens flow |
+| Use case | Programmatic calls | Live UI updates |
+
+**Streaming Behavior:**
+- Each `data:` line contains JSON with a single token
+- Tokens arrive character-by-character as AI generates
+- Final message has `"done": true` with complete response
+- Content-Type: `text/event-stream`
+
+**Implementing with Fallback:**
+
+For production apps, implement fallback to blocking endpoint:
+
+```
+1. Try /api/chat/stream first
+2. If stream fails (error, timeout, SSE parse failure):
+   → Fallback to /api/chat
+   → Show full response at once
+```
+
+**Fallback Triggers:**
+- Network/connection error
+- Timeout (no response in 30 seconds)
+- SSE parsing failure
+- HTTP error status codes (4xx, 5xx)
+
+---
+
+### API Performance
+
+The API server includes several performance optimizations:
+
+**Endpoint Caching:**
+| Endpoint | Caching | Description |
+|----------|---------|-------------|
+| `/api/health` | None (instant) | Returns immediately, no shell commands |
+| `/api/status` | 30 seconds | Caches model/version info to reduce overhead |
+| `/api/chat/stream` | None | Real-time streaming via PTY |
+
+**Why Caching Matters:**
+- Each shell command sources `engine.sh` which takes ~100-200ms
+- `/api/status` previously ran 2 shell commands per call
+- With caching, repeated status checks are instant
+- Cache automatically refreshes every 30 seconds
+
+**Best Practices for Polling:**
+```bash
+# Good: Use health for frequent checks (instant)
+curl http://localhost:8081/api/health
+
+# Good: Use status less frequently (cached)
+curl http://localhost:8081/api/status
+
+# Bad: Polling status every second (wastes resources)
+```
+
+**Streaming Performance:**
+- Uses PTY (pseudo-terminal) for unbuffered output
+- Tokens are sent character-by-character via SSE
+- No artificial delays or buffering
+- Real-time display in compatible clients
 
 ---
 
@@ -569,8 +732,81 @@ pai config set ctx_size 1024  # Less RAM
 # Start API
 pai api start
 
-# Use in your app
+# Blocking request (wait for full response)
 curl -X POST http://localhost:8081/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What is 2+2?"}'
+
+# Streaming request (real-time tokens)
+curl -N -X POST http://localhost:8081/api/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is 2+2?"}'
+```
+
+### Streaming in Your App
+
+**JavaScript/Browser:**
+```javascript
+const eventSource = new EventSource('/api/chat/stream', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ message: 'Hello' })
+});
+
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.done) {
+    console.log('Complete:', data.full_response);
+  } else {
+    process.stdout.write(data.token); // Print token
+  }
+};
+```
+
+**Python:**
+```python
+import requests
+
+response = requests.post(
+    'http://localhost:8081/api/chat/stream',
+    json={'message': 'Hello'},
+    stream=True
+)
+
+for line in response.iter_lines():
+    if line.startswith(b'data: '):
+        data = json.loads(line[6:])
+        if data.get('done'):
+            print('\nComplete!')
+        else:
+            print(data['token'], end='', flush=True)
+```
+
+**With Fallback (Recommended):**
+```python
+import requests
+
+def chat(message):
+    # Try streaming first
+    try:
+        response = requests.post(
+            'http://localhost:8081/api/chat/stream',
+            json={'message': message},
+            stream=True,
+            timeout=30
+        )
+        result = ''
+        for line in response.iter_lines():
+            if line.startswith(b'data: '):
+                data = json.loads(line[6:])
+                if data.get('done'):
+                    return data['full_response']
+                print(data['token'], end='', flush=True)
+    except:
+        # Fallback to blocking
+        response = requests.post(
+            'http://localhost:8081/api/chat',
+            json={'message': message}
+        )
+        return response.json()['response']
 ```

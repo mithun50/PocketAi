@@ -44,6 +44,7 @@ show_help() {
     echo ""
     echo -e "  ${CYAN}Setup${RESET}"
     echo "    init              Initialize PocketAI (first-time setup)"
+    echo "    update            Update PocketAI to latest version"
     echo "    status            Show system status and info"
     echo "    doctor            Diagnose and fix common issues"
     echo ""
@@ -422,6 +423,86 @@ cmd_server() {
     esac
 }
 
+cmd_update() {
+    show_banner
+    log_step "Updating PocketAI"
+
+    # Check if we're in a git repo
+    if [[ ! -d "$POCKETAI_ROOT/.git" ]]; then
+        log_error "Not a git repository. Cannot update."
+        echo ""
+        echo "To reinstall, run:"
+        echo "  cd $(dirname "$POCKETAI_ROOT")"
+        echo "  rm -rf pocketai"
+        echo "  git clone https://github.com/mithun50/PocketAi.git pocketai"
+        return 1
+    fi
+
+    cd "$POCKETAI_ROOT"
+
+    # Check for uncommitted changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        log_warn "You have local changes. Stashing them..."
+        git stash push -m "PocketAI auto-stash before update $(date +%Y%m%d_%H%M%S)"
+        local stashed=1
+    fi
+
+    # Fetch latest
+    log_info "Fetching latest changes..."
+    if ! git fetch origin 2>&1; then
+        log_error "Failed to fetch updates. Check your internet connection."
+        return 1
+    fi
+
+    # Get current and remote commit
+    local current=$(git rev-parse HEAD)
+    local remote=$(git rev-parse origin/main 2>/dev/null || git rev-parse origin/master 2>/dev/null)
+
+    if [[ "$current" == "$remote" ]]; then
+        log_success "Already up to date!"
+        echo ""
+        show_version
+        return 0
+    fi
+
+    # Show what's new
+    log_info "Changes available:"
+    git log --oneline HEAD..origin/main 2>/dev/null || git log --oneline HEAD..origin/master 2>/dev/null
+    echo ""
+
+    # Pull changes
+    log_info "Pulling updates..."
+    if git pull --ff-only origin main 2>/dev/null || git pull --ff-only origin master 2>/dev/null; then
+        log_success "Update successful!"
+    else
+        log_warn "Fast-forward failed, trying merge..."
+        if git pull origin main 2>/dev/null || git pull origin master 2>/dev/null; then
+            log_success "Update successful!"
+        else
+            log_error "Update failed. You may need to resolve conflicts manually."
+            return 1
+        fi
+    fi
+
+    # Restore stashed changes if any
+    if [[ "${stashed:-0}" == "1" ]]; then
+        log_info "Restoring your local changes..."
+        git stash pop || log_warn "Could not restore stashed changes. Use 'git stash list' to see them."
+    fi
+
+    echo ""
+    log_step "Update Complete!"
+    show_version
+    echo ""
+
+    # Check if engine needs update
+    local installed_version=$(grep -o 'LLAMAFILE_VERSION="[^"]*"' "$POCKETAI_ROOT/core/engine.sh" | cut -d'"' -f2)
+    log_info "Llamafile version: $installed_version"
+    echo ""
+    echo "If engine was updated, run: ${CYAN}pai init${RESET} to reinstall"
+    echo ""
+}
+
 cmd_api() {
     local subcmd="${1:-status}"
     shift || true
@@ -501,6 +582,7 @@ main() {
     case "$cmd" in
         # Setup
         init|setup)     cmd_init ;;
+        update|upgrade) cmd_update ;;
         status|info)    cmd_status ;;
         doctor|check)   cmd_doctor ;;
 
