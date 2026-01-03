@@ -14,7 +14,7 @@ set -euo pipefail
 
 readonly VERSION="2.0.0"
 readonly LLAMAFILE_VERSION="0.9.3"
-readonly LLAMAFILE_URL="https://github.com/Mozilla-Ocho/llamafile/releases/download/${LLAMAFILE_VERSION}/llamafile-${LLAMAFILE_VERSION}"
+readonly LLAMAFILE_URL="https://github.com/mithun50/PocketAi/releases/download/V2.0.0/llamafile-${LLAMAFILE_VERSION}.zip"
 
 # Paths (set by init or caller)
 POCKETAI_ROOT="${POCKETAI_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -133,8 +133,16 @@ engine_install() {
     if [[ -f "$DATA_DIR/llamafile" ]]; then
         log_success "Engine binary exists"
     else
-        log_info "Downloading llamafile (~5MB)..."
-        curl -L --progress-bar -o "$DATA_DIR/llamafile" "$LLAMAFILE_URL"
+        # Ensure unzip is available
+        if ! command -v unzip &>/dev/null; then
+            log_info "Installing unzip..."
+            pkg install -y unzip 2>/dev/null || true
+        fi
+        log_info "Downloading llamafile (~135MB compressed)..."
+        curl -L --progress-bar -o "$DATA_DIR/llamafile.zip" "$LLAMAFILE_URL"
+        log_info "Extracting..."
+        unzip -o -q "$DATA_DIR/llamafile.zip" -d "$DATA_DIR/"
+        rm -f "$DATA_DIR/llamafile.zip"
         chmod +x "$DATA_DIR/llamafile"
         log_success "Engine downloaded"
     fi

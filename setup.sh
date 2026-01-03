@@ -19,8 +19,8 @@ MODELS_DIR="$POCKETAI_ROOT/models"
 ENV_FILE="$HOME/.pocketai_env"
 SHELL_RC="$HOME/.bashrc"
 
-LLAMAFILE_VERSION="0.8.13"
-LLAMAFILE_URL="https://github.com/Mozilla-Ocho/llamafile/releases/download/${LLAMAFILE_VERSION}/llamafile-${LLAMAFILE_VERSION}"
+LLAMAFILE_VERSION="0.9.3"
+LLAMAFILE_URL="https://github.com/mithun50/PocketAi/releases/download/V2.0.0/llamafile-${LLAMAFILE_VERSION}.zip"
 
 CONTAINER_NAME="pocketai"
 
@@ -116,6 +116,15 @@ install_dependencies() {
         log_success "curl installed"
     fi
 
+    # Install unzip (required for extracting llamafile)
+    if command -v unzip &>/dev/null; then
+        log_success "unzip ready"
+    else
+        log_info "Installing unzip..."
+        pkg install -y unzip
+        log_success "unzip installed"
+    fi
+
     # Install python3 (required for API server)
     if command -v python3 &>/dev/null; then
         log_success "python3 ready"
@@ -173,8 +182,11 @@ setup_engine() {
     if [[ -f "$llamafile_bin" ]]; then
         log_success "Engine exists"
     else
-        log_info "Downloading llamafile (~5MB)..."
-        curl -L --progress-bar -o "$llamafile_bin" "$LLAMAFILE_URL"
+        log_info "Downloading llamafile (~135MB compressed)..."
+        curl -L --progress-bar -o "$DATA_DIR/llamafile.zip" "$LLAMAFILE_URL"
+        log_info "Extracting..."
+        unzip -o -q "$DATA_DIR/llamafile.zip" -d "$DATA_DIR/"
+        rm -f "$DATA_DIR/llamafile.zip"
         chmod +x "$llamafile_bin"
         log_success "Engine downloaded"
     fi
