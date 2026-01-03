@@ -13,7 +13,7 @@ from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 
 PORT = int(os.environ.get('API_PORT', 8081))
-POCKETAI_ROOT = os.environ.get('POCKETAI_ROOT', '/data/data/com.termux/files/home/ALLM/pocketai')
+POCKETAI_ROOT = os.environ.get('POCKETAI_ROOT', '/data/data/com.termux/files/home/PocketAi')
 
 # =============================================================================
 # Logging
@@ -61,19 +61,23 @@ _models_cache = {
 }
 
 # Model catalog - hardcoded for instant access
+# Order matters for matching - more specific patterns first
 MODEL_CATALOG = {
     'qwen3': {'desc': 'Qwen3 0.6B ⭐NEW 2025', 'size': '400MB', 'ram': '512MB'},
-    'llama3.2': {'desc': 'Llama 3.2 1B (Latest)', 'size': '700MB', 'ram': '1GB'},
+    'qwen2.5-3b': {'desc': 'Qwen2.5 3B (Best)', 'size': '2.0GB', 'ram': '3GB'},
+    'qwen2.5-1': {'desc': 'Qwen2.5 1.5B (Smartest)', 'size': '1.0GB', 'ram': '1.2GB'},
+    'qwen2.5-0': {'desc': 'Qwen2.5 0.5B (Smart)', 'size': '400MB', 'ram': '512MB'},
+    'qwen2-3b': {'desc': 'Qwen2.5 3B (Best)', 'size': '2.0GB', 'ram': '3GB'},
+    'qwen2-1b': {'desc': 'Qwen2.5 1.5B (Smartest)', 'size': '1.0GB', 'ram': '1.2GB'},
     'qwen2': {'desc': 'Qwen2.5 0.5B (Smart)', 'size': '400MB', 'ram': '512MB'},
     'qwen': {'desc': 'Qwen 0.5B Chat', 'size': '395MB', 'ram': '512MB'},
-    'smollm2': {'desc': 'SmolLM2 360M (Tiny)', 'size': '270MB', 'ram': '400MB'},
-    'smollm2-1b': {'desc': 'SmolLM2 1.7B (Better)', 'size': '1.0GB', 'ram': '1.5GB'},
-    'qwen2-1b': {'desc': 'Qwen2.5 1.5B (Smartest)', 'size': '1.0GB', 'ram': '1.2GB'},
-    'tinyllama': {'desc': 'TinyLlama 1.1B Chat', 'size': '670MB', 'ram': '1GB'},
     'llama3.2-3b': {'desc': 'Llama 3.2 3B (Best)', 'size': '2.0GB', 'ram': '2.5GB'},
+    'llama3.2': {'desc': 'Llama 3.2 1B (Latest)', 'size': '700MB', 'ram': '1GB'},
+    'smollm2-1b': {'desc': 'SmolLM2 1.7B (Better)', 'size': '1.0GB', 'ram': '1.5GB'},
+    'smollm2': {'desc': 'SmolLM2 360M (Tiny)', 'size': '270MB', 'ram': '400MB'},
+    'tinyllama': {'desc': 'TinyLlama 1.1B Chat', 'size': '670MB', 'ram': '1GB'},
     'gemma2b': {'desc': 'Gemma 2B (Google)', 'size': '1.4GB', 'ram': '2GB'},
     'phi2': {'desc': 'Phi-2 2.7B (Microsoft)', 'size': '1.6GB', 'ram': '3GB'},
-    'qwen2-3b': {'desc': 'Qwen2.5 3B (Best)', 'size': '2.0GB', 'ram': '3GB'},
 }
 
 def get_models_dir():
