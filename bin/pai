@@ -47,6 +47,7 @@ show_help() {
     echo "    update            Update PocketAI to latest version"
     echo "    status            Show system status and info"
     echo "    doctor            Diagnose and fix common issues"
+    echo "    uninstall         Remove PocketAI completely"
     echo ""
     echo -e "  ${CYAN}Models${RESET}"
     echo "    models            List available models to download"
@@ -572,6 +573,81 @@ cmd_api() {
 }
 
 # =============================================================================
+# Uninstall
+# =============================================================================
+
+cmd_uninstall() {
+    show_banner
+    log_step "Uninstalling PocketAI"
+
+    echo ""
+    echo -e "${YELLOW}This will remove:${RESET}"
+    echo "  • PocketAI container (pocketai)"
+    echo "  • Downloaded models"
+    echo "  • Configuration files"
+    echo "  • Environment settings from ~/.bashrc"
+    echo ""
+    echo -n "Are you sure? [y/N]: "
+    read -r confirm
+
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_info "Cancelled"
+        return 0
+    fi
+
+    # Stop API server
+    if pgrep -f api_server.py &>/dev/null; then
+        log_info "Stopping API server..."
+        pkill -f api_server.py 2>/dev/null || true
+        log_success "API stopped"
+    fi
+
+    # Remove container
+    if proot-distro list 2>/dev/null | grep -q "pocketai"; then
+        log_info "Removing container..."
+        proot-distro remove pocketai 2>/dev/null || true
+        log_success "Container removed"
+    fi
+
+    # Remove models
+    if [[ -d "$MODELS_DIR" ]] && [[ -n "$(ls -A "$MODELS_DIR" 2>/dev/null)" ]]; then
+        log_info "Removing models..."
+        rm -rf "$MODELS_DIR"/*.gguf 2>/dev/null || true
+        log_success "Models removed"
+    fi
+
+    # Remove data files
+    log_info "Removing data files..."
+    rm -f "$DATA_DIR/llamafile"* 2>/dev/null || true
+    rm -f "$DATA_DIR/config" 2>/dev/null || true
+    rm -f "$DATA_DIR/api.pid" 2>/dev/null || true
+    log_success "Data files removed"
+
+    # Remove environment file
+    rm -f "$HOME/.pocketai_env" 2>/dev/null || true
+    log_success "Environment file removed"
+
+    # Clean ~/.bashrc
+    local shell_rc="$HOME/.bashrc"
+    if [[ -f "$shell_rc" ]]; then
+        log_info "Cleaning ~/.bashrc..."
+        sed -i '/# PocketAI/d' "$shell_rc" 2>/dev/null || true
+        sed -i '/pocketai_env/d' "$shell_rc" 2>/dev/null || true
+        sed -i '/# Auto-start PocketAI/d' "$shell_rc" 2>/dev/null || true
+        sed -i '/pgrep -f api_server.py/d' "$shell_rc" 2>/dev/null || true
+        sed -i '/pai api web/d' "$shell_rc" 2>/dev/null || true
+        sed -i '/PocketAI API started/d' "$shell_rc" 2>/dev/null || true
+        log_success "Cleaned ~/.bashrc"
+    fi
+
+    log_step "Uninstall Complete!"
+    echo ""
+    echo -e "${DIM}Note: PocketAI source files remain in $POCKETAI_ROOT${RESET}"
+    echo -e "${DIM}To fully remove, run: rm -rf $POCKETAI_ROOT${RESET}"
+    echo ""
+}
+
+# =============================================================================
 # Main Router
 # =============================================================================
 
@@ -585,6 +661,7 @@ main() {
         update|upgrade) cmd_update ;;
         status|info)    cmd_status ;;
         doctor|check)   cmd_doctor ;;
+        uninstall)      cmd_uninstall ;;
 
         # Models
         models|model)   cmd_models "$@" ;;
