@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="docs/assets/banner.png" alt="PocketAI Banner" width="600">
+<img src="docs/assets/banner.svg" alt="PocketAI Banner" width="700">
 
 ### **Run AI models locally on your Android phone**
 
